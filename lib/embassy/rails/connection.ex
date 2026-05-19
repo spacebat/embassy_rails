@@ -33,6 +33,12 @@ defmodule Embassy.Rails.Connection do
               istate: get_in(resp, ["env", "istate"]) || %{}
           }
 
+        :telemetry.execute(
+          [:embassy_rails, :ws, :connection, :open],
+          %{monotonic_time: System.monotonic_time()},
+          %{instance: state.instance, channel_identifier: state.identifiers}
+        )
+
         schedule_ping()
         {:push, connect_frames(resp["transmissions"] || []), state}
 
@@ -95,14 +101,28 @@ defmodule Embassy.Rails.Connection do
   end
 
   @impl WebSock
-  def terminate(_reason, %{identifiers: nil}), do: :ok
+  def terminate(reason, %{identifiers: nil} = state) do
+    :telemetry.execute(
+      [:embassy_rails, :ws, :connection, :close],
+      %{monotonic_time: System.monotonic_time()},
+      %{instance: state.instance, channel_identifier: nil, reason: reason}
+    )
 
-  def terminate(_reason, state) do
+    :ok
+  end
+
+  def terminate(reason, state) do
     RPC.disconnect(state.instance, %{
       identifiers: state.identifiers,
       subscriptions: state.streams |> Map.values() |> Enum.uniq(),
       env: build_env(state)
     })
+
+    :telemetry.execute(
+      [:embassy_rails, :ws, :connection, :close],
+      %{monotonic_time: System.monotonic_time()},
+      %{instance: state.instance, channel_identifier: state.identifiers, reason: reason}
+    )
 
     :ok
   end

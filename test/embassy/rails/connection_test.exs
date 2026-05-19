@@ -237,4 +237,42 @@ defmodule Embassy.Rails.ConnectionTest do
     decoded = Jason.decode!(frame)
     assert decoded["message"] == "not json"
   end
+
+  test "init/1 success emits :ws, :connection, :open telemetry", %{bypass: bypass, state: state} do
+    {:ok, collector} =
+      Embassy.Rails.Test.TelemetryCollector.attach([
+        [:embassy_rails, :ws, :connection, :open]
+      ])
+
+    Bypass.expect_once(bypass, "POST", "/_anycable/connect", fn conn ->
+      Plug.Conn.resp(conn, 200, ~s({"status":1,"identifiers":"abc"}))
+    end)
+
+    Connection.init(state)
+
+    events = Embassy.Rails.Test.TelemetryCollector.events(collector)
+    assert [{[:embassy_rails, :ws, :connection, :open], _measurements, meta}] = events
+    assert meta.instance == Embassy.Rails.ConnectionTest.Instance
+  end
+
+  test "terminate/2 emits :ws, :connection, :close telemetry", %{bypass: bypass, state: state} do
+    {:ok, collector} =
+      Embassy.Rails.Test.TelemetryCollector.attach([
+        [:embassy_rails, :ws, :connection, :close]
+      ])
+
+    Bypass.expect(bypass, "POST", "/_anycable/disconnect", fn conn ->
+      Plug.Conn.resp(conn, 200, "{}")
+    end)
+
+    state_with_ids = %{state | identifiers: "abc"}
+    Connection.terminate(:normal, state_with_ids)
+
+    # Give the async disconnect task time to fire (mirrors existing terminate test).
+    Process.sleep(200)
+
+    events = Embassy.Rails.Test.TelemetryCollector.events(collector)
+    assert [{[:embassy_rails, :ws, :connection, :close], _measurements, meta}] = events
+    assert meta.instance == Embassy.Rails.ConnectionTest.Instance
+  end
 end
