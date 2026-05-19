@@ -71,7 +71,7 @@ defmodule Embassy.Rails.RPCTest do
 
     assert :ok == RPC.disconnect(instance, %{identifiers: "abc", subscriptions: []})
     # Give the async task time to actually post before bypass tears down.
-    Process.sleep(50)
+    Process.sleep(200)
   end
 
   test "non-200 response returns {:error, {:http, status, body}}", %{

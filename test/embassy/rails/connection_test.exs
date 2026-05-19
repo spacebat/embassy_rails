@@ -99,6 +99,6 @@ defmodule Embassy.Rails.ConnectionTest do
     state_with_ids = %{state | identifiers: "abc", streams: %{"chat" => "{}"}}
     assert :ok = Connection.terminate(:normal, state_with_ids)
     # Give the async disconnect task time to fire.
-    Process.sleep(50)
+    Process.sleep(200)
   end
 end
