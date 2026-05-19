@@ -101,4 +101,91 @@ defmodule Embassy.Rails.ConnectionTest do
     # Give the async disconnect task time to fire.
     Process.sleep(200)
   end
+
+  test "handle_in subscribe: applies streams, pushes transmissions, mutates state", %{
+    bypass: bypass,
+    state: state
+  } do
+    state_with_ids = %{state | identifiers: "abc"}
+
+    Bypass.expect_once(bypass, "POST", "/_anycable/command", fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      assert Jason.decode!(body)["command"] == "subscribe"
+
+      Plug.Conn.resp(
+        conn,
+        200,
+        ~s({"status":1,"streams":["chat_5"],"transmissions":["{\\"identifier\\":\\"X\\"}"],"env":{"cstate":{"u":"1"}}})
+      )
+    end)
+
+    frame = Jason.encode!(%{"command" => "subscribe", "identifier" => "X", "data" => ""})
+
+    assert {:push, [{:text, _}], new_state} =
+             Connection.handle_in({frame, [opcode: :text]}, state_with_ids)
+
+    assert Map.has_key?(new_state.streams, "chat_5")
+    assert new_state.cstate == %{"u" => "1"}
+  end
+
+  test "handle_in unsubscribe: stops streams, no transmissions", %{bypass: bypass, state: state} do
+    state_with_sub = %{state | identifiers: "abc", streams: %{"chat_5" => "X"}}
+
+    Bypass.expect_once(bypass, "POST", "/_anycable/command", fn conn ->
+      Plug.Conn.resp(conn, 200, ~s({"status":1,"stop_streams":true}))
+    end)
+
+    frame = Jason.encode!(%{"command" => "unsubscribe", "identifier" => "X"})
+
+    assert {:ok, new_state} = Connection.handle_in({frame, [opcode: :text]}, state_with_sub)
+    refute Map.has_key?(new_state.streams, "chat_5")
+  end
+
+  test "handle_in message: status 1 with disconnect: true closes 1000", %{
+    bypass: bypass,
+    state: state
+  } do
+    state_with_ids = %{state | identifiers: "abc"}
+
+    Bypass.expect_once(bypass, "POST", "/_anycable/command", fn conn ->
+      Plug.Conn.resp(conn, 200, ~s({"status":1,"disconnect":true,"transmissions":["bye"]}))
+    end)
+
+    frame = Jason.encode!(%{"command" => "message", "identifier" => "X", "data" => "hi"})
+
+    assert {:stop, :normal, {1000, "server_disconnect"}, [{:text, "bye"}], _} =
+             Connection.handle_in({frame, [opcode: :text]}, state_with_ids)
+  end
+
+  test "handle_in status 0 (Rails-side error): logs, keeps connection open", %{
+    bypass: bypass,
+    state: state
+  } do
+    Bypass.expect_once(bypass, "POST", "/_anycable/command", fn conn ->
+      Plug.Conn.resp(conn, 200, ~s({"status":0,"error":"boom"}))
+    end)
+
+    frame = Jason.encode!(%{"command" => "subscribe", "identifier" => "X"})
+
+    assert {:ok, _} =
+             Connection.handle_in({frame, [opcode: :text]}, %{state | identifiers: "abc"})
+  end
+
+  test "handle_in RPC error: drops frame, keeps connection open", %{bypass: bypass, state: state} do
+    Bypass.down(bypass)
+
+    frame = Jason.encode!(%{"command" => "subscribe", "identifier" => "X"})
+
+    assert {:ok, _} =
+             Connection.handle_in({frame, [opcode: :text]}, %{state | identifiers: "abc"})
+  end
+
+  test "handle_in malformed JSON: drops frame, keeps connection open", %{state: state} do
+    assert {:ok, ^state} = Connection.handle_in({"not json", [opcode: :text]}, state)
+  end
+
+  test "handle_in unknown command: drops frame, keeps connection open", %{state: state} do
+    frame = Jason.encode!(%{"command" => "weird_thing"})
+    assert {:ok, ^state} = Connection.handle_in({frame, [opcode: :text]}, state)
+  end
 end

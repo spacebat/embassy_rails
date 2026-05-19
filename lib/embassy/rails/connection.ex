@@ -15,7 +15,7 @@ defmodule Embassy.Rails.Connection do
 
   @behaviour WebSock
 
-  alias Embassy.Rails.RPC
+  alias Embassy.Rails.{Broadcast, Config, RPC}
 
   require Logger
 
@@ -54,9 +54,20 @@ defmodule Embassy.Rails.Connection do
     {:ok, state}
   end
 
-  def handle_in({_payload, [opcode: :text]}, state) do
-    # Command handling lands in Task 10.
-    {:ok, state}
+  def handle_in({payload, [opcode: :text]}, state) do
+    case Jason.decode(payload) do
+      {:ok, %{"command" => command} = msg}
+      when command in ["subscribe", "unsubscribe", "message"] ->
+        handle_command(command, msg, state)
+
+      {:ok, other} ->
+        Logger.debug("Embassy.Rails.Connection: ignoring unknown frame: #{inspect(other)}")
+        {:ok, state}
+
+      {:error, _} ->
+        Logger.warning("Embassy.Rails.Connection: malformed JSON frame")
+        {:ok, state}
+    end
   end
 
   @impl WebSock
@@ -105,4 +116,87 @@ defmodule Embassy.Rails.Connection do
   end
 
   defp schedule_ping, do: Process.send_after(self(), :ping, @ping_interval)
+
+  defp handle_command(command, %{"identifier" => identifier} = msg, state) do
+    payload = %{
+      command: command,
+      identifier: identifier,
+      data: msg["data"] || "",
+      connection_identifiers: state.identifiers,
+      env: build_env(state)
+    }
+
+    case RPC.command(state.instance, payload) do
+      {:ok, %{"status" => status} = resp} when status in [1, 2] ->
+        apply_command_response(resp, identifier, state)
+
+      {:ok, resp} ->
+        Logger.warning("Embassy.Rails.Connection: error command response=#{inspect(resp)}")
+        {:ok, state}
+
+      {:error, reason} ->
+        Logger.error("Embassy.Rails.Connection: command RPC failed: #{inspect(reason)}")
+        {:ok, state}
+    end
+  end
+
+  defp handle_command(_command, _msg, state), do: {:ok, state}
+
+  defp apply_command_response(resp, identifier, state) do
+    state =
+      state
+      |> Map.put(:cstate, get_in(resp, ["env", "cstate"]) || state.cstate)
+      |> Map.put(:istate, get_in(resp, ["env", "istate"]) || state.istate)
+      |> add_streams(resp["streams"] || [], identifier)
+      |> drop_streams(resp["stopped_streams"] || [])
+      |> maybe_stop_all_streams(resp["stop_streams"], identifier)
+
+    frames = Enum.map(resp["transmissions"] || [], &{:text, &1})
+
+    case {resp["disconnect"], frames} do
+      {true, _} -> {:stop, :normal, {1000, "server_disconnect"}, frames, state}
+      {_, []} -> {:ok, state}
+      _ -> {:push, frames, state}
+    end
+  end
+
+  defp add_streams(state, streams, identifier) do
+    snap = Config.snapshot(state.instance)
+
+    Enum.reduce(streams, state, fn stream, acc ->
+      if Map.has_key?(acc.streams, stream) do
+        acc
+      else
+        Phoenix.PubSub.subscribe(snap.pubsub, Broadcast.topic(stream))
+        %{acc | streams: Map.put(acc.streams, stream, identifier)}
+      end
+    end)
+  end
+
+  defp drop_streams(state, streams) do
+    snap = Config.snapshot(state.instance)
+
+    Enum.reduce(streams, state, fn stream, acc ->
+      Phoenix.PubSub.unsubscribe(snap.pubsub, Broadcast.topic(stream))
+      %{acc | streams: Map.delete(acc.streams, stream)}
+    end)
+  end
+
+  defp maybe_stop_all_streams(state, true, identifier) do
+    snap = Config.snapshot(state.instance)
+
+    streams =
+      Map.reject(state.streams, fn {stream, id} ->
+        if id == identifier do
+          Phoenix.PubSub.unsubscribe(snap.pubsub, Broadcast.topic(stream))
+          true
+        else
+          false
+        end
+      end)
+
+    %{state | streams: streams}
+  end
+
+  defp maybe_stop_all_streams(state, _, _), do: state
 end
