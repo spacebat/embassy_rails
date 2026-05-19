@@ -24,7 +24,8 @@ defmodule Embassy.Rails.Broadcast do
   to this stream on the local node.
 
   The message shape is `{:cable_broadcast, stream, payload}` so
-  `Embassy.Rails.Connection.handle_info/2` can pattern-match.
+  `Embassy.Rails.Connection` WS handlers can pattern-match in their
+  `handle_info` callback.
   """
   @spec dispatch(atom(), String.t(), map()) :: :ok
   def dispatch(instance, stream, payload) when is_atom(instance) and is_binary(stream) do

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+(no unreleased changes)
+
+## [0.1.0] - 2026-05-19
+
 ### Added
 
 - `Embassy.Rails` supervisor and `child_spec/1` for consumer-tree mounting,
