@@ -188,4 +188,53 @@ defmodule Embassy.Rails.ConnectionTest do
     frame = Jason.encode!(%{"command" => "weird_thing"})
     assert {:ok, ^state} = Connection.handle_in({frame, [opcode: :text]}, state)
   end
+
+  test "handle_info({:cable_broadcast, ...}) pushes payload to client when subscribed", %{
+    state: state
+  } do
+    state_sub = %{
+      state
+      | identifiers: "abc",
+        streams: %{"chat_5" => ~s({"channel":"ChatChannel","room":"5"})}
+    }
+
+    payload = %{data: ~s({"text":"hi"}), exclude_socket: nil}
+
+    assert {:push, {:text, frame}, ^state_sub} =
+             Connection.handle_info({:cable_broadcast, "chat_5", payload}, state_sub)
+
+    decoded = Jason.decode!(frame)
+    assert decoded["identifier"] == ~s({"channel":"ChatChannel","room":"5"})
+    assert decoded["message"] == %{"text" => "hi"}
+  end
+
+  test "handle_info ignores broadcast for unsubscribed stream", %{state: state} do
+    assert {:ok, ^state} =
+             Connection.handle_info({:cable_broadcast, "other", %{data: "x"}}, state)
+  end
+
+  test "handle_info respects exclude_socket filter", %{state: state} do
+    state_sub = %{
+      state
+      | identifiers: "abc",
+        streams: %{"chat_5" => "X"}
+    }
+
+    payload = %{data: "x", exclude_socket: state_sub.socket_id}
+
+    assert {:ok, ^state_sub} =
+             Connection.handle_info({:cable_broadcast, "chat_5", payload}, state_sub)
+  end
+
+  test "handle_info passes through non-JSON data verbatim", %{state: state} do
+    state_sub = %{state | identifiers: "abc", streams: %{"chat_5" => "X"}}
+
+    payload = %{data: "not json", exclude_socket: nil}
+
+    assert {:push, {:text, frame}, ^state_sub} =
+             Connection.handle_info({:cable_broadcast, "chat_5", payload}, state_sub)
+
+    decoded = Jason.decode!(frame)
+    assert decoded["message"] == "not json"
+  end
 end

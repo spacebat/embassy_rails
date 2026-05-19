@@ -77,6 +77,18 @@ defmodule Embassy.Rails.Connection do
     {:push, frame, state}
   end
 
+  def handle_info({:cable_broadcast, stream, payload}, state) do
+    with identifier when not is_nil(identifier) <- state.streams[stream],
+         false <- payload[:exclude_socket] == state.socket_id do
+      frame =
+        Jason.encode!(%{identifier: identifier, message: decode_data(payload[:data])})
+
+      {:push, {:text, frame}, state}
+    else
+      _ -> {:ok, state}
+    end
+  end
+
   def handle_info(msg, state) do
     Logger.debug("Embassy.Rails.Connection: ignoring info: #{inspect(msg)}")
     {:ok, state}
@@ -199,4 +211,18 @@ defmodule Embassy.Rails.Connection do
   end
 
   defp maybe_stop_all_streams(state, _, _), do: state
+
+  # AnyCable broadcast payloads include `data` as a pre-serialized JSON
+  # string. ActionCable's client wants the parsed object under `message`,
+  # so we re-parse here. Non-JSON data passes through verbatim.
+  defp decode_data(nil), do: nil
+
+  defp decode_data(data) when is_binary(data) do
+    case Jason.decode(data) do
+      {:ok, parsed} -> parsed
+      {:error, _} -> data
+    end
+  end
+
+  defp decode_data(data), do: data
 end
