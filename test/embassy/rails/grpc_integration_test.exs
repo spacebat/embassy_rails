@@ -3,11 +3,13 @@ defmodule Embassy.Rails.GrpcIntegrationTest do
   # module-derived name; concurrent test runs would collide on that name.
   use ExUnit.Case, async: false
 
+  alias Embassy.Rails.GrpcChannel
   alias Embassy.Rails.RPC
+  alias Embassy.Rails.Test.GrpcServer
 
   setup do
     instance = :"grpc_int_#{System.unique_integer([:positive])}"
-    {:ok, endpoint} = Embassy.Rails.Test.GrpcServer.start("ignored")
+    {:ok, endpoint} = GrpcServer.start("ignored")
 
     start_supervised!({Finch, name: :"#{instance}.Finch"})
     start_supervised!({Phoenix.PubSub, name: :"#{instance}.PubSub"})
@@ -23,7 +25,7 @@ defmodule Embassy.Rails.GrpcIntegrationTest do
     )
 
     assert eventually(fn ->
-             match?({:ok, _}, Embassy.Rails.GrpcChannel.fetch_channel(instance))
+             match?({:ok, _}, GrpcChannel.fetch_channel(instance))
            end)
 
     {:ok, instance: instance}

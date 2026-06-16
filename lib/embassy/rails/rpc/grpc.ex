@@ -7,6 +7,9 @@ if Code.ensure_loaded?(GRPC.Stub) do
     `Embassy.Rails.Connection` reads, so the transport is transparent.
     """
 
+    alias Anycable.RPC.Stub, as: AnycableStub
+    alias Embassy.Rails.GrpcChannel
+
     # --- request builders ------------------------------------------------
 
     @doc false
@@ -94,28 +97,28 @@ if Code.ensure_loaded?(GRPC.Stub) do
 
     @doc false
     def call(instance, op, request) do
-      case Embassy.Rails.GrpcChannel.fetch_channel(instance) do
+      case GrpcChannel.fetch_channel(instance) do
         {:ok, channel} -> do_call(channel, op, request)
         :error -> {:error, :no_channel}
       end
     end
 
     defp do_call(channel, :connect, request) do
-      case Anycable.RPC.Stub.connect(channel, request) do
+      case AnycableStub.connect(channel, request) do
         {:ok, resp} -> {:ok, normalize_connect(resp)}
         {:error, reason} -> {:error, grpc_error(reason)}
       end
     end
 
     defp do_call(channel, :command, request) do
-      case Anycable.RPC.Stub.command(channel, request) do
+      case AnycableStub.command(channel, request) do
         {:ok, resp} -> {:ok, normalize_command(resp)}
         {:error, reason} -> {:error, grpc_error(reason)}
       end
     end
 
     defp do_call(channel, :disconnect, request) do
-      case Anycable.RPC.Stub.disconnect(channel, request) do
+      case AnycableStub.disconnect(channel, request) do
         {:ok, resp} -> {:ok, normalize_disconnect(resp)}
         {:error, reason} -> {:error, grpc_error(reason)}
       end

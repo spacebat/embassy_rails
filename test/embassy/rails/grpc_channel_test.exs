@@ -2,6 +2,7 @@ defmodule Embassy.Rails.GrpcChannelTest do
   use ExUnit.Case, async: true
 
   alias Embassy.Rails.GrpcChannel
+  alias Embassy.Rails.Test.GrpcServer
 
   setup do
     instance = :"grpc_chan_#{System.unique_integer([:positive])}"
@@ -13,7 +14,7 @@ defmodule Embassy.Rails.GrpcChannelTest do
   test "publishes the channel to Registry meta on successful connect", %{instance: instance} do
     # Start the in-test gRPC server on an ephemeral TCP port (127.0.0.1:0).
     # UDS via the Mint adapter is not supported in grpc 1.0; see test/support/grpc_server.ex.
-    {:ok, endpoint} = Embassy.Rails.Test.GrpcServer.start("ignored")
+    {:ok, endpoint} = GrpcServer.start("ignored")
 
     start_supervised!({GrpcChannel, instance: instance, endpoint: endpoint, secret: "shh"})
 
