@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 (no unreleased changes)
 
+## [0.2.0] - 2026-06-16
+
+### Added
+
+- `Embassy.Rails.RedisListener`: AnyCable Redis broadcaster source.
+  Configure with `broadcast: [source: :redis, redis: <url-or-opts>,
+  channel: "__anycable__"]`. Requires the optional `:redix` dependency.
+- `:telemetry` events `[:embassy_rails, :broadcast, :redis, :connected
+  | :disconnected | :exception]`.
+
 ## [0.1.0] - 2026-05-19
 
 ### Added

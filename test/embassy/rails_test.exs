@@ -80,4 +80,67 @@ defmodule Embassy.RailsTest do
     assert Process.whereis(Embassy.RailsTest.A)
     assert Process.whereis(Embassy.RailsTest.B)
   end
+
+  describe "redis broadcast source" do
+    setup do
+      start_supervised!({Finch, name: __MODULE__.RedisFinch}, id: :redis_finch)
+      start_supervised!({Phoenix.PubSub, name: __MODULE__.RedisPubSub}, id: :redis_pubsub)
+
+      start_supervised!({Embassy, name: __MODULE__.RedisEmbassy, finch: __MODULE__.RedisFinch},
+        id: :redis_embassy
+      )
+
+      :ok
+    end
+
+    test "starts a RedisListener child when source is :redis" do
+      start_supervised!(
+        {Embassy.Rails,
+         name: __MODULE__.RedisInstance,
+         embassy: __MODULE__.RedisEmbassy,
+         pubsub: __MODULE__.RedisPubSub,
+         rpc: [transport: {:http, "http://example.test"}, secret: "shh"],
+         broadcast: [source: :redis, redis: [host: "127.0.0.1", port: 1]]}
+      )
+
+      children = Supervisor.which_children(__MODULE__.RedisInstance)
+
+      assert Enum.any?(children, fn {id, pid, _type, _mods} ->
+               id == Embassy.Rails.RedisListener and is_pid(pid)
+             end)
+    end
+
+    test "does not start a RedisListener child when source is :http" do
+      start_supervised!(
+        {Embassy.Rails,
+         name: __MODULE__.HttpInstance,
+         embassy: __MODULE__.RedisEmbassy,
+         pubsub: __MODULE__.RedisPubSub,
+         rpc: [transport: {:http, "http://example.test"}, secret: "shh"],
+         broadcast: [source: :http, key: "bcast"]}
+      )
+
+      children = Supervisor.which_children(__MODULE__.HttpInstance)
+
+      refute Enum.any?(children, fn {id, _pid, _type, _mods} ->
+               id == Embassy.Rails.RedisListener
+             end)
+    end
+  end
+
+  describe "validate_broadcast!/2" do
+    test "raises when source is :redis but redix is unavailable" do
+      assert_raise ArgumentError, ~r/requires the :redix dependency/, fn ->
+        Embassy.Rails.validate_broadcast!([source: :redis, redis: "redis://x"], false)
+      end
+    end
+
+    test "passes when source is :redis and redix is available" do
+      assert Embassy.Rails.validate_broadcast!([source: :redis, redis: "redis://x"], true) == :ok
+    end
+
+    test "passes for the :http source regardless of redix" do
+      assert Embassy.Rails.validate_broadcast!([source: :http, key: "k"], false) == :ok
+    end
+  end
 end

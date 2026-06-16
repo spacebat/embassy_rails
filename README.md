@@ -8,7 +8,7 @@ backend via AnyCable's HTTP RPC and broadcast protocols.
 per-instance config harness) and `Phoenix.PubSub` to form a complete
 Phoenix-as-front-door deployment for Rails.
 
-## What ships in v0.1
+## What ships in v0.2
 
 - **`Embassy.Rails.Upgrade`** — WS upgrade plug with subprotocol
   negotiation (defaults to `actioncable-v1-json`).
@@ -20,16 +20,27 @@ Phoenix-as-front-door deployment for Rails.
 - **`Embassy.Rails.BroadcastPlug`** — HTTP `/_broadcast` endpoint Plug
   for AnyCable's broadcast adapter.
 - **`Embassy.Rails.Broadcast`** — PubSub fan-out helper.
+- **`Embassy.Rails.RedisListener`** — AnyCable Redis broadcaster source.
 - **`Embassy.Rails`** supervisor + **`Embassy.Rails.Config`** — per-
   instance plumbing.
 - `:telemetry` for RPC, broadcast, upgrade, and WS lifecycle.
 
-## Not in v0.1
+## Not yet shipped
 
-- Redis broadcast source (HTTP-only; Redis comes in v0.2).
 - Generic `Embassy.Upgrade` extraction (this lives in
   `Embassy.Rails.Upgrade` for now; will migrate non-breaking).
 - gRPC + Protobuf RPC transport.
+
+## Broadcast sources
+
+Broadcasts from Rails reach connected clients via one of two sources,
+selected per instance with `broadcast: [source: ...]`:
+
+- `:http` — AnyCable's HTTP broadcaster posts to `Embassy.Rails.BroadcastPlug`.
+- `:redis` — `Embassy.Rails.RedisListener` subscribes to AnyCable's Redis
+  broadcaster channel (default `"__anycable__"`). Requires the optional
+  `:redix` dependency. Useful when scaling terminator nodes horizontally
+  or when Rails and the terminators should communicate only through Redis.
 
 ## Installation
 
@@ -92,7 +103,7 @@ the same Rails backend via `Embassy.ReverseProxy` on a different route.
 
 ## Status
 
-v0.1.0-dev. Not yet published to Hex.
+v0.2.0-dev. Not yet published to Hex.
 
 ## License
 

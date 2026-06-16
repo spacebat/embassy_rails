@@ -2,7 +2,7 @@ defmodule EmbassyRails.MixProject do
   use Mix.Project
 
   @source_url "https://github.com/spacebat/embassy_rails"
-  @version "0.1.0-dev"
+  @version "0.2.0-dev"
 
   def project do
     [
@@ -31,10 +31,12 @@ defmodule EmbassyRails.MixProject do
   defp deps do
     [
       {:embassy, path: "../embassy"},
+      {:igniter, "~> 0.6", optional: true},
       {:plug, "~> 1.16"},
       {:websock_adapter, "~> 0.5"},
       {:phoenix_pubsub, "~> 2.1"},
       {:jason, "~> 1.4"},
+      {:redix, "~> 1.0", optional: true},
       {:telemetry, "~> 1.2"},
       {:bypass, "~> 2.1", only: :test},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},

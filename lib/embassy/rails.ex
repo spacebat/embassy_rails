@@ -18,8 +18,12 @@ defmodule Embassy.Rails do
       instance the consumer owns.
     * `:rpc` — keyword. Must include `:transport` (`{:uds, path}` or
       `{:http, base_url}`) and `:secret` (bearer token).
-    * `:broadcast` — keyword. Must include `:source` (`:http` in v0.1)
-      and `:key` (bearer token for `POST /_broadcast`).
+    * `:broadcast` — keyword. Must include `:source`. For
+      `source: :http`: `:key` (bearer token for `POST /_broadcast`).
+      For `source: :redis`: `:redis` (a `Redix.PubSub` URL string or
+      options keyword) and optionally `:channel` (defaults to
+      `"__anycable__"`). The `:redis` source requires the optional
+      `:redix` dependency.
 
   ## Example
 
@@ -36,6 +40,17 @@ defmodule Embassy.Rails do
       ]
 
       Supervisor.start_link(children, strategy: :one_for_one)
+
+  ## Redis broadcast source
+
+      {Embassy.Rails,
+         name: MyApp.Embassy.Rails,
+         embassy: MyApp.Embassy,
+         pubsub: MyApp.PubSub,
+         rpc: [transport: {:uds, "/tmp/puma.sock"}, secret: "..."],
+         broadcast: [source: :redis, redis: "redis://localhost:6379/1"]}
+
+  Requires `{:redix, "~> 1.0"}` in the consumer's deps.
   """
 
   use Supervisor
@@ -51,7 +66,8 @@ defmodule Embassy.Rails do
     embassy = fetch_required!(opts, :embassy)
     _pubsub = fetch_required!(opts, :pubsub)
     _rpc = fetch_required!(opts, :rpc)
-    _broadcast = fetch_required!(opts, :broadcast)
+    broadcast = fetch_required!(opts, :broadcast)
+    validate_broadcast!(broadcast, Code.ensure_loaded?(Redix.PubSub))
     # Validate the parent Embassy instance is running in the caller's
     # process so that Embassy.NotStartedError is raised synchronously
     # (making assert_raise work in tests, and giving a clean error in
@@ -100,9 +116,9 @@ defmodule Embassy.Rails do
       broadcast: broadcast
     }
 
-    children = [
-      {Registry, keys: :unique, name: registry_name(name), meta: [config: snapshot]}
-    ]
+    children =
+      [{Registry, keys: :unique, name: registry_name(name), meta: [config: snapshot]}] ++
+        broadcast_children(name, broadcast)
 
     Supervisor.init(children, strategy: :one_for_one)
   end
@@ -111,6 +127,32 @@ defmodule Embassy.Rails do
     case Keyword.fetch(opts, key) do
       {:ok, value} -> value
       :error -> raise ArgumentError, "required option #{inspect(key)} is missing"
+    end
+  end
+
+  @doc false
+  def validate_broadcast!(broadcast, redix_available?) do
+    if Keyword.get(broadcast, :source) == :redis and not redix_available? do
+      raise ArgumentError,
+            "Embassy.Rails: broadcast source :redis requires the :redix dependency; " <>
+              "add {:redix, \"~> 1.0\"} to your deps"
+    end
+
+    :ok
+  end
+
+  defp broadcast_children(name, broadcast) do
+    case Keyword.get(broadcast, :source) do
+      :redis ->
+        [
+          {Embassy.Rails.RedisListener,
+           instance: name,
+           redis: Keyword.fetch!(broadcast, :redis),
+           channel: Keyword.get(broadcast, :channel)}
+        ]
+
+      _ ->
+        []
     end
   end
 end

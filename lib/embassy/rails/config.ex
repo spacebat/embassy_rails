@@ -5,6 +5,10 @@ defmodule Embassy.Rails.Config do
   Reads a snapshot stashed in the per-instance Registry metadata by the
   `Embassy.Rails` supervisor. Lookup is O(1) and safe to call once per
   request or once per WebSocket callback.
+
+  The `:broadcast` keyword carries `source: :http | :redis`. For `:http`
+  it also carries `:key`; for `:redis` it carries `:redis` (URL or opts)
+  and optionally `:channel`.
   """
 
   @typedoc """
