@@ -101,4 +101,27 @@ defmodule Mix.Tasks.EmbassyRails.InstallTest do
       assert_unchanged(twice, "lib/test/application.ex")
     end
   end
+
+  describe "router scope (http source)" do
+    test "adds /cable, /_broadcast, and / forwards in match order" do
+      content = rendered(install([]), "lib/test_web/router.ex")
+
+      assert content =~ "Embassy.Rails.Upgrade"
+      assert content =~ "embassy_rails: Test.Embassy.Rails"
+      assert content =~ "subprotocols: [\"actioncable-v1-json\"]"
+      assert content =~ "Embassy.Rails.BroadcastPlug"
+      assert content =~ "Embassy.ReverseProxy"
+
+      cable_at = :binary.match(content, "/cable") |> elem(0)
+      broadcast_at = :binary.match(content, "/_broadcast") |> elem(0)
+      proxy_at = :binary.match(content, "Embassy.ReverseProxy") |> elem(0)
+      assert cable_at < broadcast_at
+      assert broadcast_at < proxy_at
+    end
+
+    test "the /cable forward carries no handler option" do
+      content = rendered(install([]), "lib/test_web/router.ex")
+      refute content =~ "handler:"
+    end
+  end
 end

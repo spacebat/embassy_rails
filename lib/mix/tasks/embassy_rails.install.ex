@@ -53,6 +53,7 @@ if Code.ensure_loaded?(Igniter.Mix.Task) do
       igniter
       |> compose_base(opts)
       |> add_supervision_tree(opts)
+      |> add_router_scope(opts)
     end
 
     # --- option resolution -----------------------------------------------
@@ -199,6 +200,41 @@ if Code.ensure_loaded?(Igniter.Mix.Task) do
          broadcast: opts.broadcast},
         after: [Phoenix.PubSub, Embassy]
       )
+    end
+
+    # --- router scope ----------------------------------------------------
+
+    defp add_router_scope(igniter, opts) do
+      forwards =
+        [cable_forward(opts), broadcast_forward(opts), proxy_forward(opts)]
+        |> Enum.reject(&is_nil/1)
+        |> Enum.join("\n\n")
+
+      Igniter.Libs.Phoenix.add_scope(igniter, "/", forwards, router: opts.router)
+    end
+
+    defp cable_forward(opts) do
+      """
+      forward "/cable", Embassy.Rails.Upgrade,
+        embassy_rails: #{inspect(opts.name)},
+        subprotocols: ["actioncable-v1-json"]
+      """
+      |> String.trim_trailing()
+    end
+
+    defp broadcast_forward(%{source: "http"} = opts) do
+      ~s(forward "/_broadcast", Embassy.Rails.BroadcastPlug, embassy_rails: #{inspect(opts.name)})
+    end
+
+    defp broadcast_forward(_opts), do: nil
+
+    defp proxy_forward(opts) do
+      """
+      forward "/", Embassy.ReverseProxy,
+        embassy: #{inspect(opts.embassy)},
+        transport: #{transport_tuple(opts)}
+      """
+      |> String.trim_trailing()
     end
 
     # --- base composition ------------------------------------------------
