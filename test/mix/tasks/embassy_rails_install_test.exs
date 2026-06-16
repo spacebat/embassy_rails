@@ -124,4 +124,63 @@ defmodule Mix.Tasks.EmbassyRails.InstallTest do
       refute content =~ "handler:"
     end
   end
+
+  describe "redis source" do
+    defp install_redis(extra) do
+      phx_test_project()
+      |> Igniter.compose_task(
+        "embassy_rails.install",
+        base_args(["--source", "redis", "--redis-url", "redis://localhost:6379/1"]) ++ extra
+      )
+    end
+
+    test "writes the redis broadcast config and adds the redix dep" do
+      igniter = install_redis([])
+      app = rendered(igniter, "lib/test/application.ex")
+      mix = rendered(igniter, "mix.exs")
+
+      assert app =~ "source: :redis"
+      assert app =~ "redis: \"redis://localhost:6379/1\""
+      assert mix =~ ":redix"
+    end
+
+    test "does not add a /_broadcast route for the redis source" do
+      content = rendered(install_redis([]), "lib/test_web/router.ex")
+      refute content =~ "Embassy.Rails.BroadcastPlug"
+      assert content =~ "Embassy.Rails.Upgrade"
+    end
+
+    test "http source does not add the redix dep" do
+      mix = rendered(install([]), "mix.exs")
+      refute mix =~ ":redix"
+    end
+  end
+
+  describe "notices" do
+    test "warns when --yes leaves the secret as a placeholder" do
+      igniter =
+        phx_test_project()
+        |> Igniter.compose_task("embassy_rails.install", [
+          "--yes",
+          "--name",
+          "Test.Embassy.Rails",
+          "--embassy",
+          "Test.Embassy",
+          "--pubsub",
+          "Test.PubSub",
+          "--finch",
+          "Test.Finch",
+          "--transport",
+          "uds",
+          "--address",
+          "/tmp/puma.sock"
+        ])
+
+      assert_has_notice(igniter, &(&1 =~ ~r/RPC secret/))
+    end
+
+    test "redis source emits a redix / deps.get notice" do
+      assert_has_notice(install_redis([]), &(&1 =~ ~r/redix/))
+    end
+  end
 end

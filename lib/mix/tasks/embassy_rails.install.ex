@@ -54,6 +54,8 @@ if Code.ensure_loaded?(Igniter.Mix.Task) do
       |> compose_base(opts)
       |> add_supervision_tree(opts)
       |> add_router_scope(opts)
+      |> add_broadcast_deps(opts)
+      |> add_notices(opts)
     end
 
     # --- option resolution -----------------------------------------------
@@ -235,6 +237,61 @@ if Code.ensure_loaded?(Igniter.Mix.Task) do
         transport: #{transport_tuple(opts)}
       """
       |> String.trim_trailing()
+    end
+
+    # --- broadcast deps --------------------------------------------------
+
+    defp add_broadcast_deps(igniter, %{source: "redis"}) do
+      Igniter.Project.Deps.add_dep(igniter, {:redix, "~> 1.0"})
+    end
+
+    defp add_broadcast_deps(igniter, _opts), do: igniter
+
+    # --- notices ---------------------------------------------------------
+
+    defp add_notices(igniter, opts) do
+      igniter
+      |> maybe_secret_notice(opts)
+      |> maybe_key_notice(opts)
+      |> source_notice(opts)
+    end
+
+    defp maybe_secret_notice(igniter, %{secret: @placeholder_secret}) do
+      Igniter.add_notice(igniter, """
+      Embassy.Rails: replace the placeholder RPC secret
+      (#{@placeholder_secret}) in your supervision tree with the AnyCable
+      RPC secret shared with Rails.
+      """)
+    end
+
+    defp maybe_secret_notice(igniter, _opts), do: igniter
+
+    defp maybe_key_notice(igniter, %{source: "http", key: @placeholder_key}) do
+      Igniter.add_notice(igniter, """
+      Embassy.Rails: replace the placeholder broadcast key
+      (#{@placeholder_key}) and set the same token on AnyCable's HTTP
+      broadcaster.
+      """)
+    end
+
+    defp maybe_key_notice(igniter, _opts), do: igniter
+
+    defp source_notice(igniter, %{source: "redis"}) do
+      Igniter.add_notice(igniter, """
+      Embassy.Rails: the :redis broadcast source needs the :redix
+      dependency, which was added to mix.exs -- run `mix deps.get`. Point
+      AnyCable's Redis broadcaster at the channel (default
+      #{@default_channel}) and make sure the Redis URL is reachable from
+      every terminator node.
+      """)
+    end
+
+    defp source_notice(igniter, _opts) do
+      Igniter.add_notice(igniter, """
+      Embassy.Rails: configure AnyCable's HTTP broadcaster to POST to
+      /_broadcast with the shared key, and set the matching RPC secret on
+      both Rails and this app.
+      """)
     end
 
     # --- base composition ------------------------------------------------
