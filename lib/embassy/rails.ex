@@ -16,8 +16,10 @@ defmodule Embassy.Rails do
       Finch this adapter will use.
     * `:pubsub` — atom; the name of a running `Phoenix.PubSub`
       instance the consumer owns.
-    * `:rpc` — keyword. Must include `:transport` (`{:uds, path}` or
-      `{:http, base_url}`) and `:secret` (bearer token).
+    * `:rpc` — keyword. Must include `:transport` (`{:uds, path}`,
+      `{:http, base_url}`, or `{:grpc, endpoint}`) and `:secret` (bearer
+      token). The `:grpc` form requires the optional `:grpc` and
+      `:protobuf` deps.
     * `:broadcast` — keyword. Must include `:source`. For
       `source: :http`: `:key` (bearer token for `POST /_broadcast`).
       For `source: :redis`: `:redis` (a `Redix.PubSub` URL string or

@@ -1,12 +1,15 @@
 defmodule Embassy.Rails.RPC do
   @moduledoc """
-  HTTP RPC client speaking AnyCable's protocol to Rails.
+  AnyCable RPC client. Dispatches to the transport configured per instance
+  via the `:rpc` opts snapshot key.
 
-  Transport is per-instance, read from the snapshot's `:rpc` opts:
+  Transport forms:
 
     * `{:uds, socket_path}` — Finch dials a Unix domain socket; URL
       host is cosmetic.
     * `{:http, base_url}` — Finch dials a regular HTTP server.
+    * `{:grpc, endpoint}` — gRPC channel over `"host:port"`, using the
+      optional `:grpc` and `:protobuf` deps.
 
   Three operations:
 
