@@ -31,6 +31,7 @@ defmodule EmbassyRails.MixProject do
   defp deps do
     [
       {:embassy, path: "../embassy"},
+      {:igniter, "~> 0.6", optional: true},
       {:plug, "~> 1.16"},
       {:websock_adapter, "~> 0.5"},
       {:phoenix_pubsub, "~> 2.1"},
