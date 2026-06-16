@@ -65,9 +65,10 @@ defmodule Embassy.Rails do
     name = fetch_required!(opts, :name)
     embassy = fetch_required!(opts, :embassy)
     _pubsub = fetch_required!(opts, :pubsub)
-    _rpc = fetch_required!(opts, :rpc)
+    rpc = fetch_required!(opts, :rpc)
     broadcast = fetch_required!(opts, :broadcast)
     validate_broadcast!(broadcast, Code.ensure_loaded?(Redix.PubSub))
+    validate_rpc!(rpc, Code.ensure_loaded?(GRPC.Stub))
     # Validate the parent Embassy instance is running in the caller's
     # process so that Embassy.NotStartedError is raised synchronously
     # (making assert_raise work in tests, and giving a clean error in
@@ -118,6 +119,7 @@ defmodule Embassy.Rails do
 
     children =
       [{Registry, keys: :unique, name: registry_name(name), meta: [config: snapshot]}] ++
+        rpc_children(name, rpc) ++
         broadcast_children(name, broadcast)
 
     Supervisor.init(children, strategy: :one_for_one)
@@ -139,6 +141,33 @@ defmodule Embassy.Rails do
     end
 
     :ok
+  end
+
+  @doc false
+  def validate_rpc!(rpc, grpc_available?) do
+    case Keyword.get(rpc, :transport) do
+      {:grpc, _endpoint} when not grpc_available? ->
+        raise ArgumentError,
+              "Embassy.Rails: rpc transport :grpc requires the :grpc and :protobuf " <>
+                "dependencies; add {:grpc, \"~> 1.0\"} and {:protobuf, \"~> 0.17\"} to your deps"
+
+      _ ->
+        :ok
+    end
+  end
+
+  @doc false
+  def rpc_children(name, rpc) do
+    case Keyword.get(rpc, :transport) do
+      {:grpc, endpoint} ->
+        [
+          {Embassy.Rails.GrpcChannel,
+           instance: name, endpoint: endpoint, secret: Keyword.fetch!(rpc, :secret)}
+        ]
+
+      _ ->
+        []
+    end
   end
 
   defp broadcast_children(name, broadcast) do
