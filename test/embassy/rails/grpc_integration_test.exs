@@ -1,4 +1,6 @@
 defmodule Embassy.Rails.GrpcIntegrationTest do
+  # async: false because GrpcServer starts a Cowboy listener under a fixed
+  # module-derived name; concurrent test runs would collide on that name.
   use ExUnit.Case, async: false
 
   alias Embassy.Rails.RPC
