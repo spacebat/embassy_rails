@@ -30,4 +30,36 @@ defmodule Embassy.Rails.RedisListenerTest do
       assert RedisListener.decode_anycable(~s({"stream":42,"data":"hi"})) == :error
     end
   end
+
+  describe "handle_info :message" do
+    setup do
+      start_supervised!({Finch, name: __MODULE__.Finch})
+      start_supervised!({Phoenix.PubSub, name: __MODULE__.PubSub})
+      start_supervised!({Embassy, name: __MODULE__.Embassy, finch: __MODULE__.Finch})
+
+      start_supervised!(
+        {Embassy.Rails,
+         name: __MODULE__.Instance,
+         embassy: __MODULE__.Embassy,
+         pubsub: __MODULE__.PubSub,
+         rpc: [transport: {:http, "http://example.test"}, secret: "shh"],
+         broadcast: [source: :http, key: "bcast"]}
+      )
+
+      {:ok, instance: __MODULE__.Instance}
+    end
+
+    test "decodes a message and fans it out via dispatch", %{instance: instance} do
+      Phoenix.PubSub.subscribe(__MODULE__.PubSub, Embassy.Rails.Broadcast.topic("chat:1"))
+
+      state = %{instance: instance, channel: "__anycable__", conn: nil, ref: nil}
+
+      msg =
+        {:redix_pubsub, self(), make_ref(), :message,
+         %{channel: "__anycable__", payload: ~s({"stream":"chat:1","data":"hi"})}}
+
+      assert {:noreply, ^state} = RedisListener.handle_info(msg, state)
+      assert_receive {:cable_broadcast, "chat:1", %{data: "hi"}}, 100
+    end
+  end
 end

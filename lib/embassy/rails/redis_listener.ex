@@ -18,6 +18,27 @@ defmodule Embassy.Rails.RedisListener do
 
   @default_channel "__anycable__"
 
+  @impl true
+  def handle_info({:redix_pubsub, _conn, _ref, :message, %{payload: payload}}, state) do
+    case decode_anycable(payload) do
+      {:ok, stream, broadcast_payload} ->
+        Broadcast.dispatch(state.instance, stream, broadcast_payload)
+
+      :error ->
+        Logger.warning("Embassy.Rails.RedisListener: malformed broadcast envelope")
+
+        :telemetry.execute(
+          [:embassy_rails, :broadcast, :redis, :exception],
+          %{monotonic_time: System.monotonic_time()},
+          %{instance: state.instance, kind: :bad_envelope}
+        )
+    end
+
+    {:noreply, state}
+  end
+
+  def handle_info(_msg, state), do: {:noreply, state}
+
   @doc """
   Decode an AnyCable Redis broadcaster envelope.
 
