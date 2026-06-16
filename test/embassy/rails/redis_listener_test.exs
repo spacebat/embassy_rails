@@ -1,6 +1,7 @@
 defmodule Embassy.Rails.RedisListenerTest do
   use ExUnit.Case, async: true
 
+  alias Embassy.Rails.Broadcast
   alias Embassy.Rails.RedisListener
 
   describe "decode_anycable/1" do
@@ -50,7 +51,7 @@ defmodule Embassy.Rails.RedisListenerTest do
     end
 
     test "decodes a message and fans it out via dispatch", %{instance: instance} do
-      Phoenix.PubSub.subscribe(__MODULE__.PubSub, Embassy.Rails.Broadcast.topic("chat:1"))
+      Phoenix.PubSub.subscribe(__MODULE__.PubSub, Broadcast.topic("chat:1"))
 
       state = %{instance: instance, channel: "__anycable__", conn: nil, ref: nil}
 
