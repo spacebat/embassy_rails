@@ -2,7 +2,7 @@ defmodule EmbassyRails.MixProject do
   use Mix.Project
 
   @source_url "https://github.com/spacebat/embassy_rails"
-  @version "0.1.0-dev"
+  @version "0.2.0-dev"
 
   def project do
     [

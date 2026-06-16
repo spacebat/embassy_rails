@@ -18,8 +18,12 @@ defmodule Embassy.Rails do
       instance the consumer owns.
     * `:rpc` — keyword. Must include `:transport` (`{:uds, path}` or
       `{:http, base_url}`) and `:secret` (bearer token).
-    * `:broadcast` — keyword. Must include `:source` (`:http` in v0.1)
-      and `:key` (bearer token for `POST /_broadcast`).
+    * `:broadcast` — keyword. Must include `:source`. For
+      `source: :http`: `:key` (bearer token for `POST /_broadcast`).
+      For `source: :redis`: `:redis` (a `Redix.PubSub` URL string or
+      options keyword) and optionally `:channel` (defaults to
+      `"__anycable__"`). The `:redis` source requires the optional
+      `:redix` dependency.
 
   ## Example
 
@@ -36,6 +40,17 @@ defmodule Embassy.Rails do
       ]
 
       Supervisor.start_link(children, strategy: :one_for_one)
+
+  ## Redis broadcast source
+
+      {Embassy.Rails,
+         name: MyApp.Embassy.Rails,
+         embassy: MyApp.Embassy,
+         pubsub: MyApp.PubSub,
+         rpc: [transport: {:uds, "/tmp/puma.sock"}, secret: "..."],
+         broadcast: [source: :redis, redis: "redis://localhost:6379/1"]}
+
+  Requires `{:redix, "~> 1.0"}` in the consumer's deps.
   """
 
   use Supervisor
