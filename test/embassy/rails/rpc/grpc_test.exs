@@ -32,6 +32,11 @@ defmodule Embassy.Rails.RPC.GrpcTest do
       assert normalized["status"] == 2
       assert normalized["env"] == %{"cstate" => %{}, "istate" => %{}}
     end
+
+    test "passes through an integer status value unchanged" do
+      resp = %Anycable.ConnectionResponse{status: 0, identifiers: "", transmissions: [], env: nil}
+      assert Grpc.normalize_connect(resp)["status"] == 0
+    end
   end
 
   describe "normalize_command/1" do
@@ -66,6 +71,27 @@ defmodule Embassy.Rails.RPC.GrpcTest do
       assert %Anycable.ConnectionRequest{env: %Anycable.Env{} = e} = req
       assert e.url == "wss://t/"
       assert e.cstate == %{"a" => "b"}
+    end
+  end
+
+  describe "normalize_disconnect/1" do
+    test "maps a SUCCESS DisconnectResponse to a status map" do
+      resp = %Anycable.DisconnectResponse{status: :SUCCESS}
+      assert Grpc.normalize_disconnect(resp) == %{"status" => 1}
+    end
+  end
+
+  describe "build_disconnect_request/1" do
+    test "builds a DisconnectRequest from a payload map" do
+      payload = %{
+        identifiers: ~s({"uid":1}),
+        subscriptions: [~s({"channel":"ChatChannel"})],
+        env: %{url: "wss://t/", headers: %{}, cstate: %{}, istate: %{}}
+      }
+
+      req = Grpc.build_disconnect_request(payload)
+      assert %Anycable.DisconnectRequest{identifiers: ~s({"uid":1})} = req
+      assert req.subscriptions == [~s({"channel":"ChatChannel"})]
     end
   end
 
