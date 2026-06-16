@@ -42,6 +42,20 @@ selected per instance with `broadcast: [source: ...]`:
   `:redix` dependency. Useful when scaling terminator nodes horizontally
   or when Rails and the terminators should communicate only through Redis.
 
+## Installer
+
+With the optional `:igniter` dependency present, wire Embassy.Rails into a
+Phoenix app in one command:
+
+    mix igniter.install embassy_rails
+
+It composes embassy's installer for the Finch + Embassy base, then adds a
+`Phoenix.PubSub`, an `Embassy.Rails` instance, and a router scope
+(`/cable` WebSocket upgrade, an optional `/_broadcast` endpoint for the
+HTTP broadcast source, and the `/` reverse proxy). Use
+`--source redis` to wire the Redis broadcast source instead (adds
+`{:redix, "~> 1.0"}`). Pass `--yes` for non-interactive defaults.
+
 ## Installation
 
 ```elixir

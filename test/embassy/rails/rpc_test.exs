@@ -125,7 +125,13 @@ defmodule Embassy.Rails.RPCTest do
 
     RPC.connect(instance, %{url: "wss://t/", headers: %{}, cstate: %{}, istate: %{}})
 
-    events = TelemetryCollector.events(collector)
+    # Telemetry handlers attach globally per event name, so a concurrent
+    # async test emitting [:embassy_rails, :rpc, :exception] for a different
+    # instance would also land in this collector. Scope to our instance.
+    events =
+      TelemetryCollector.events(collector)
+      |> Enum.filter(fn {_name, _measurements, meta} -> meta.instance == instance end)
+
     assert [{[:embassy_rails, :rpc, :exception], _measurements, meta}] = events
     assert meta.kind == :connect_error
   end

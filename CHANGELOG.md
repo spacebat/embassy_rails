@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   channel: "__anycable__"]`. Requires the optional `:redix` dependency.
 - `:telemetry` events `[:embassy_rails, :broadcast, :redis, :connected
   | :disconnected | :exception]`.
+- `mix embassy_rails.install`: Igniter installer that wires Embassy.Rails
+  into a Phoenix app (composes `embassy.install`, adds the PubSub +
+  `Embassy.Rails` child and the `/cable`, `/_broadcast`, `/` routes).
+  Requires the optional `:igniter` dependency.
 
 ## [0.1.0] - 2026-05-19
 
