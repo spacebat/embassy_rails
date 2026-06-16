@@ -70,4 +70,35 @@ defmodule Mix.Tasks.EmbassyRails.InstallTest do
       assert content =~ "{Embassy, [name: Test.Embassy, finch: Test.Finch]}"
     end
   end
+
+  describe "supervision tree" do
+    test "adds Phoenix.PubSub and the Embassy.Rails child with rpc + http broadcast" do
+      content = rendered(install([]), "lib/test/application.ex")
+
+      assert content =~ "Phoenix.PubSub"
+      assert content =~ "Embassy.Rails"
+      assert content =~ "name: Test.Embassy.Rails"
+      assert content =~ "embassy: Test.Embassy"
+      assert content =~ "pubsub: Test.PubSub"
+      assert content =~ "transport: {:uds, \"/tmp/puma.sock\"}"
+      assert content =~ "secret: \"topsecret\""
+      assert content =~ "source: :http"
+    end
+
+    test "Embassy is positioned before Embassy.Rails in the children list" do
+      content = rendered(install([]), "lib/test/application.ex")
+      embassy_at = :binary.match(content, "{Embassy,") |> elem(0)
+      rails_at = :binary.match(content, "{Embassy.Rails,") |> elem(0)
+      assert embassy_at < rails_at
+    end
+
+    test "is idempotent for the supervision tree on a second run" do
+      twice =
+        install([])
+        |> apply_igniter!()
+        |> Igniter.compose_task("embassy_rails.install", base_args([]))
+
+      assert_unchanged(twice, "lib/test/application.ex")
+    end
+  end
 end

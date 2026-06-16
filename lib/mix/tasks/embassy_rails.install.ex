@@ -52,6 +52,7 @@ if Code.ensure_loaded?(Igniter.Mix.Task) do
 
       igniter
       |> compose_base(opts)
+      |> add_supervision_tree(opts)
     end
 
     # --- option resolution -----------------------------------------------
@@ -177,6 +178,28 @@ if Code.ensure_loaded?(Igniter.Mix.Task) do
 
     defp transport_tuple(opts),
       do: "{#{inspect(transport_atom(opts.transport))}, #{inspect(opts.address)}}"
+
+    # --- supervision tree ------------------------------------------------
+
+    defp add_supervision_tree(igniter, opts) do
+      # Phoenix apps usually already declare a Phoenix.PubSub child; add_new_child
+      # no-ops on the module conflict. Embassy.Rails validates the parent Embassy
+      # instance synchronously at start, so it must boot after Embassy (and after
+      # PubSub, which it uses for fan-out): place it with `after:`.
+      igniter
+      |> Igniter.Project.Application.add_new_child({Phoenix.PubSub, name: opts.pubsub},
+        after: [Embassy]
+      )
+      |> Igniter.Project.Application.add_new_child(
+        {Embassy.Rails,
+         name: opts.name,
+         embassy: opts.embassy,
+         pubsub: opts.pubsub,
+         rpc: [transport: {transport_atom(opts.transport), opts.address}, secret: opts.secret],
+         broadcast: opts.broadcast},
+        after: [Phoenix.PubSub, Embassy]
+      )
+    end
 
     # --- base composition ------------------------------------------------
 
