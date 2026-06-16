@@ -55,6 +55,7 @@ defmodule Embassy.Rails.RPC do
     start = System.monotonic_time()
     transport = snap.rpc[:transport]
 
+    # Byte measurements omitted: Protobuf encoding cost is required to compute them.
     :telemetry.execute(
       [:embassy_rails, :rpc, op, :start],
       %{monotonic_time: start},
@@ -72,6 +73,10 @@ defmodule Embassy.Rails.RPC do
         ok
 
       {:error, reason} = err ->
+        Logger.warning(
+          "Embassy.Rails.RPC grpc dispatch failed (instance=#{inspect(instance)}, op=#{op}): #{inspect(reason)}"
+        )
+
         :telemetry.execute(
           [:embassy_rails, :rpc, :exception],
           %{monotonic_time: System.monotonic_time(), duration: System.monotonic_time() - start},
