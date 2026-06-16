@@ -58,8 +58,19 @@ defmodule Embassy.Rails.Test.GrpcServer do
   @spec start(Path.t()) :: {:ok, String.t()} | {:error, any()}
   def start(_sock_path) do
     case GRPC.Server.start(Impl, 0) do
-      {:ok, _pid, port} -> {:ok, "127.0.0.1:#{port}"}
-      {:error, _} = err -> err
+      {:ok, _pid, port} ->
+        {:ok, "127.0.0.1:#{port}"}
+
+      {:error, {:already_started, _pid}} ->
+        # Cowboy registers the listener under a fixed name derived from the
+        # server module.  When multiple tests call start/1 sequentially the
+        # server is already up; just retrieve the assigned port from Ranch.
+        listener = inspect(Impl)
+        port = :ranch.get_port(listener)
+        {:ok, "127.0.0.1:#{port}"}
+
+      {:error, _} = err ->
+        err
     end
   end
 end
