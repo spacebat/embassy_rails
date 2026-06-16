@@ -26,7 +26,10 @@ if Code.ensure_loaded?(GRPC.Stub) do
     """
     @spec fetch_channel(atom()) :: {:ok, GRPC.Channel.t()} | :error
     def fetch_channel(instance) do
-      Registry.meta(Embassy.Rails.registry_name(instance), :grpc_channel)
+      case Registry.meta(Embassy.Rails.registry_name(instance), :grpc_channel) do
+        {:ok, %GRPC.Channel{} = channel} -> {:ok, channel}
+        _ -> :error
+      end
     end
 
     defp via(instance), do: {:via, Registry, {Embassy.Rails.registry_name(instance), __MODULE__}}
@@ -50,6 +53,7 @@ if Code.ensure_loaded?(GRPC.Stub) do
     @impl true
     def handle_info(:reconnect, state), do: {:noreply, connect(state)}
 
+    @impl true
     def handle_info(_msg, state), do: {:noreply, state}
 
     defp connect(state) do
@@ -64,6 +68,8 @@ if Code.ensure_loaded?(GRPC.Stub) do
           %{state | channel: channel, backoff: @backoff_start}
 
         {:error, reason} ->
+          Registry.put_meta(Embassy.Rails.registry_name(state.instance), :grpc_channel, nil)
+
           Logger.warning(
             "Embassy.Rails.GrpcChannel(#{inspect(state.instance)}): connect failed: #{inspect(reason)}; retrying in #{state.backoff}ms"
           )
