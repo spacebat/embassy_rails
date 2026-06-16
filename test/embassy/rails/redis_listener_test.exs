@@ -62,4 +62,42 @@ defmodule Embassy.Rails.RedisListenerTest do
       assert_receive {:cable_broadcast, "chat:1", %{data: "hi"}}, 100
     end
   end
+
+  describe "handle_info lifecycle" do
+    alias Embassy.Rails.Test.TelemetryCollector
+
+    test "emits :connected telemetry on :subscribed" do
+      {:ok, collector} =
+        TelemetryCollector.attach([[:embassy_rails, :broadcast, :redis, :connected]])
+
+      state = %{instance: :inst, channel: "__anycable__", conn: nil, ref: nil}
+
+      msg = {:redix_pubsub, self(), make_ref(), :subscribed, %{channel: "__anycable__"}}
+      assert {:noreply, ^state} = RedisListener.handle_info(msg, state)
+
+      assert [{[:embassy_rails, :broadcast, :redis, :connected], _meas, meta}] =
+               TelemetryCollector.events(collector)
+
+      assert meta.instance == :inst
+      assert meta.channel == "__anycable__"
+    end
+
+    test "emits :disconnected telemetry on :disconnected" do
+      {:ok, collector} =
+        TelemetryCollector.attach([[:embassy_rails, :broadcast, :redis, :disconnected]])
+
+      state = %{instance: :inst, channel: "__anycable__", conn: nil, ref: nil}
+
+      msg =
+        {:redix_pubsub, self(), make_ref(), :disconnected,
+         %{error: %Redix.ConnectionError{reason: :closed}}}
+
+      assert {:noreply, ^state} = RedisListener.handle_info(msg, state)
+
+      assert [{[:embassy_rails, :broadcast, :redis, :disconnected], _meas, meta}] =
+               TelemetryCollector.events(collector)
+
+      assert meta.instance == :inst
+    end
+  end
 end

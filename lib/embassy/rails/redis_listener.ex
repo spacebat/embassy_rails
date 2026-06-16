@@ -37,6 +37,30 @@ defmodule Embassy.Rails.RedisListener do
     {:noreply, state}
   end
 
+  def handle_info({:redix_pubsub, _conn, _ref, :subscribed, %{channel: channel}}, state) do
+    Logger.info("Embassy.Rails.RedisListener: subscribed to #{channel}")
+
+    :telemetry.execute(
+      [:embassy_rails, :broadcast, :redis, :connected],
+      %{monotonic_time: System.monotonic_time()},
+      %{instance: state.instance, channel: channel}
+    )
+
+    {:noreply, state}
+  end
+
+  def handle_info({:redix_pubsub, _conn, _ref, :disconnected, _props}, state) do
+    Logger.warning("Embassy.Rails.RedisListener: disconnected from Redis")
+
+    :telemetry.execute(
+      [:embassy_rails, :broadcast, :redis, :disconnected],
+      %{monotonic_time: System.monotonic_time()},
+      %{instance: state.instance}
+    )
+
+    {:noreply, state}
+  end
+
   def handle_info(_msg, state), do: {:noreply, state}
 
   @doc """
