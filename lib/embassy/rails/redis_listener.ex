@@ -18,6 +18,23 @@ defmodule Embassy.Rails.RedisListener do
 
   @default_channel "__anycable__"
 
+  @doc false
+  def start_link(opts) do
+    GenServer.start_link(__MODULE__, opts)
+  end
+
+  @impl true
+  def init(opts) do
+    instance = Keyword.fetch!(opts, :instance)
+    channel = Keyword.get(opts, :channel) || @default_channel
+    redis = Keyword.fetch!(opts, :redis)
+
+    {:ok, conn} = Redix.PubSub.start_link(redis)
+    {:ok, ref} = Redix.PubSub.subscribe(conn, channel, self())
+
+    {:ok, %{instance: instance, channel: channel, conn: conn, ref: ref}}
+  end
+
   @impl true
   def handle_info({:redix_pubsub, _conn, _ref, :message, %{payload: payload}}, state) do
     case decode_anycable(payload) do

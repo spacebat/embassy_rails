@@ -51,7 +51,8 @@ defmodule Embassy.Rails do
     embassy = fetch_required!(opts, :embassy)
     _pubsub = fetch_required!(opts, :pubsub)
     _rpc = fetch_required!(opts, :rpc)
-    _broadcast = fetch_required!(opts, :broadcast)
+    broadcast = fetch_required!(opts, :broadcast)
+    validate_broadcast!(broadcast, Code.ensure_loaded?(Redix.PubSub))
     # Validate the parent Embassy instance is running in the caller's
     # process so that Embassy.NotStartedError is raised synchronously
     # (making assert_raise work in tests, and giving a clean error in
@@ -100,9 +101,9 @@ defmodule Embassy.Rails do
       broadcast: broadcast
     }
 
-    children = [
-      {Registry, keys: :unique, name: registry_name(name), meta: [config: snapshot]}
-    ]
+    children =
+      [{Registry, keys: :unique, name: registry_name(name), meta: [config: snapshot]}] ++
+        broadcast_children(name, broadcast)
 
     Supervisor.init(children, strategy: :one_for_one)
   end
@@ -111,6 +112,32 @@ defmodule Embassy.Rails do
     case Keyword.fetch(opts, key) do
       {:ok, value} -> value
       :error -> raise ArgumentError, "required option #{inspect(key)} is missing"
+    end
+  end
+
+  @doc false
+  def validate_broadcast!(broadcast, redix_available?) do
+    if Keyword.get(broadcast, :source) == :redis and not redix_available? do
+      raise ArgumentError,
+            "Embassy.Rails: broadcast source :redis requires the :redix dependency; " <>
+              "add {:redix, \"~> 1.0\"} to your deps"
+    end
+
+    :ok
+  end
+
+  defp broadcast_children(name, broadcast) do
+    case Keyword.get(broadcast, :source) do
+      :redis ->
+        [
+          {Embassy.Rails.RedisListener,
+           instance: name,
+           redis: Keyword.fetch!(broadcast, :redis),
+           channel: Keyword.get(broadcast, :channel)}
+        ]
+
+      _ ->
+        []
     end
   end
 end
