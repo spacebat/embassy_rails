@@ -29,7 +29,6 @@ Phoenix-as-front-door deployment for Rails.
 
 - Generic `Embassy.Upgrade` extraction (this lives in
   `Embassy.Rails.Upgrade` for now; will migrate non-breaking).
-- gRPC + Protobuf RPC transport.
 
 ## Broadcast sources
 
@@ -100,6 +99,22 @@ scope "/", MyAppWeb do
   post "/_broadcast", Embassy.Rails.BroadcastPlug, embassy_rails: MyApp.Embassy.Rails
 end
 ```
+
+### gRPC RPC transport
+
+To front a standard AnyCable deployment whose RPC server speaks gRPC, use
+the `:grpc` transport instead of `:uds`/`:http`:
+
+    rpc: [transport: {:grpc, "localhost:50051"}, secret: "rpc-secret"]
+
+This requires the optional `:grpc` and `:protobuf` dependencies:
+
+    {:grpc, "~> 1.0"},
+    {:protobuf, "~> 0.17"}
+
+The same `:secret` is sent as gRPC `authorization: Bearer` metadata, so a
+Rails app configured with one AnyCable RPC secret works across the HTTP
+and gRPC transports unchanged.
 
 ## Telemetry
 

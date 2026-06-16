@@ -7,7 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-(no unreleased changes)
+### Added
+
+- gRPC AnyCable RPC transport: `rpc: [transport: {:grpc, endpoint},
+  secret: ...]`, where `endpoint` is `"host:port"`. Lets embassy_rails
+  front a standard AnyCable Rails deployment whose RPC server speaks gRPC,
+  with no HTTP RPC shim. Requires the optional `:grpc` and `:protobuf`
+  dependencies. The transport is transparent to `Embassy.Rails.Connection`.
 
 ## [0.2.0] - 2026-06-16
 
