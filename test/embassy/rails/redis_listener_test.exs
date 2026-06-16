@@ -100,4 +100,24 @@ defmodule Embassy.Rails.RedisListenerTest do
       assert meta.instance == :inst
     end
   end
+
+  describe "handle_info :message with a bad envelope" do
+    alias Embassy.Rails.Test.TelemetryCollector
+
+    test "drops the message and emits :exception telemetry" do
+      {:ok, collector} =
+        TelemetryCollector.attach([[:embassy_rails, :broadcast, :redis, :exception]])
+
+      state = %{instance: :inst, channel: "c", conn: nil, ref: nil}
+
+      msg = {:redix_pubsub, self(), make_ref(), :message, %{channel: "c", payload: "not json"}}
+      assert {:noreply, ^state} = RedisListener.handle_info(msg, state)
+
+      assert [{[:embassy_rails, :broadcast, :redis, :exception], _meas, meta}] =
+               TelemetryCollector.events(collector)
+
+      assert meta.kind == :bad_envelope
+      assert meta.instance == :inst
+    end
+  end
 end
