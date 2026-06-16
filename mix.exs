@@ -35,6 +35,7 @@ defmodule EmbassyRails.MixProject do
       {:websock_adapter, "~> 0.5"},
       {:phoenix_pubsub, "~> 2.1"},
       {:jason, "~> 1.4"},
+      {:redix, "~> 1.0", optional: true},
       {:telemetry, "~> 1.2"},
       {:bypass, "~> 2.1", only: :test},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
