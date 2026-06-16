@@ -2,7 +2,7 @@ defmodule EmbassyRails.MixProject do
   use Mix.Project
 
   @source_url "https://github.com/spacebat/embassy_rails"
-  @version "0.2.0"
+  @version "0.3.0-dev"
 
   def project do
     [
@@ -37,6 +37,9 @@ defmodule EmbassyRails.MixProject do
       {:phoenix_pubsub, "~> 2.1"},
       {:jason, "~> 1.4"},
       {:redix, "~> 1.0", optional: true},
+      {:grpc, "~> 1.0", optional: true},
+      {:protobuf, "~> 0.17", optional: true},
+      {:grpc_server, "~> 1.0", only: :test},
       {:telemetry, "~> 1.2"},
       {:bypass, "~> 2.1", only: :test},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
@@ -67,7 +70,7 @@ defmodule EmbassyRails.MixProject do
       maintainers: ["Andrew Kirkpatrick"],
       licenses: ["MIT"],
       links: %{"GitHub" => @source_url},
-      files: ~w(lib mix.exs README.md CHANGELOG.md LICENSE)
+      files: ~w(lib priv mix.exs README.md CHANGELOG.md LICENSE)
     ]
   end
 
