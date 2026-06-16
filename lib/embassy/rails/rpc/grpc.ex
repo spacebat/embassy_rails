@@ -89,6 +89,42 @@ if Code.ensure_loaded?(GRPC.Stub) do
     defp env_response(%Anycable.EnvResponse{} = env) do
       %{"cstate" => env.cstate || %{}, "istate" => env.istate || %{}}
     end
+
+    # --- channel dispatch -------------------------------------------------
+
+    @doc false
+    def call(instance, op, request) do
+      case Embassy.Rails.GrpcChannel.fetch_channel(instance) do
+        {:ok, channel} -> do_call(channel, op, request)
+        :error -> {:error, :no_channel}
+      end
+    end
+
+    defp do_call(channel, :connect, request) do
+      case Anycable.RPC.Stub.connect(channel, request) do
+        {:ok, resp} -> {:ok, normalize_connect(resp)}
+        {:error, reason} -> {:error, grpc_error(reason)}
+      end
+    end
+
+    defp do_call(channel, :command, request) do
+      case Anycable.RPC.Stub.command(channel, request) do
+        {:ok, resp} -> {:ok, normalize_command(resp)}
+        {:error, reason} -> {:error, grpc_error(reason)}
+      end
+    end
+
+    defp do_call(channel, :disconnect, request) do
+      case Anycable.RPC.Stub.disconnect(channel, request) do
+        {:ok, resp} -> {:ok, normalize_disconnect(resp)}
+        {:error, reason} -> {:error, grpc_error(reason)}
+      end
+    end
+
+    defp grpc_error(%GRPC.RPCError{status: status, message: message}),
+      do: {:grpc, status, message}
+
+    defp grpc_error(other), do: {:grpc, other}
   end
 else
   defmodule Embassy.Rails.RPC.Grpc do

@@ -110,4 +110,17 @@ defmodule Embassy.Rails.RPC.GrpcTest do
       assert msg.connection_identifiers == ~s({"uid":1})
     end
   end
+
+  describe "call/3 without a published channel" do
+    setup do
+      instance = :"grpc_rpc_#{System.unique_integer([:positive])}"
+      start_supervised!({Registry, keys: :unique, name: Embassy.Rails.registry_name(instance)})
+      {:ok, instance: instance}
+    end
+
+    test "returns {:error, :no_channel} when the holder has not connected", %{instance: instance} do
+      req = Grpc.build_connect_request(%{url: "wss://t/", headers: %{}, cstate: %{}, istate: %{}})
+      assert {:error, :no_channel} = Grpc.call(instance, :connect, req)
+    end
+  end
 end

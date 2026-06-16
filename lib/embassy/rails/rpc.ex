@@ -22,19 +22,67 @@ defmodule Embassy.Rails.RPC do
   @timeout 5_000
 
   @spec connect(atom(), map()) :: {:ok, map()} | {:error, term()}
-  def connect(instance, env), do: post(instance, :connect, "/_anycable/connect", %{env: env})
+  def connect(instance, env), do: dispatch(instance, :connect, "/_anycable/connect", %{env: env})
 
   @spec command(atom(), map()) :: {:ok, map()} | {:error, term()}
-  def command(instance, payload), do: post(instance, :command, "/_anycable/command", payload)
+  def command(instance, payload), do: dispatch(instance, :command, "/_anycable/command", payload)
 
   @spec disconnect(atom(), map()) :: :ok
   def disconnect(instance, payload) do
-    Task.start(fn -> post(instance, :disconnect, "/_anycable/disconnect", payload) end)
+    Task.start(fn -> dispatch(instance, :disconnect, "/_anycable/disconnect", payload) end)
     :ok
   end
 
-  defp post(instance, op, path, body) do
+  defp dispatch(instance, op, path, body) do
     snap = Config.snapshot(instance)
+
+    case snap.rpc[:transport] do
+      {:grpc, _endpoint} -> grpc_dispatch(instance, op, body, snap)
+      _ -> post(instance, op, path, body, snap)
+    end
+  end
+
+  defp grpc_dispatch(instance, op, body, snap) do
+    alias Embassy.Rails.RPC.Grpc
+
+    request =
+      case op do
+        :connect -> Grpc.build_connect_request(body.env)
+        :command -> Grpc.build_command_request(body)
+        :disconnect -> Grpc.build_disconnect_request(body)
+      end
+
+    start = System.monotonic_time()
+    transport = snap.rpc[:transport]
+
+    :telemetry.execute(
+      [:embassy_rails, :rpc, op, :start],
+      %{monotonic_time: start},
+      %{instance: instance, transport: transport}
+    )
+
+    case Grpc.call(instance, op, request) do
+      {:ok, resp} = ok ->
+        :telemetry.execute(
+          [:embassy_rails, :rpc, op, :stop],
+          %{monotonic_time: System.monotonic_time(), duration: System.monotonic_time() - start},
+          %{instance: instance, transport: transport, status: resp["status"]}
+        )
+
+        ok
+
+      {:error, reason} = err ->
+        :telemetry.execute(
+          [:embassy_rails, :rpc, :exception],
+          %{monotonic_time: System.monotonic_time(), duration: System.monotonic_time() - start},
+          %{instance: instance, kind: kind_for(op), reason: reason}
+        )
+
+        err
+    end
+  end
+
+  defp post(instance, op, path, body, snap) do
     {url, finch_opts} = request_target(path, snap.rpc[:transport])
 
     headers = [
