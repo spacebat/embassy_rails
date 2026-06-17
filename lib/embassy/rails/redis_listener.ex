@@ -32,7 +32,7 @@ defmodule Embassy.Rails.RedisListener do
     {:ok, conn} = Redix.PubSub.start_link(redis)
     {:ok, ref} = Redix.PubSub.subscribe(conn, channel, self())
 
-    {:ok, %{instance: instance, channel: channel, conn: conn, ref: ref}}
+    {:ok, %{instance: instance, channel: channel, conn: conn, ref: ref, status: :initial}}
   end
 
   @impl true
@@ -54,6 +54,19 @@ defmodule Embassy.Rails.RedisListener do
     {:noreply, state}
   end
 
+  def handle_info({:redix_pubsub, _conn, _ref, :subscribed, %{channel: channel}},
+                  %{status: :disconnected} = state) do
+    Logger.info("Embassy.Rails.RedisListener: reconnected to #{channel}")
+
+    :telemetry.execute(
+      [:embassy_rails, :broadcast, :redis, :reconnected],
+      %{monotonic_time: System.monotonic_time()},
+      %{instance: state.instance, channel: channel}
+    )
+
+    {:noreply, %{state | status: :connected}}
+  end
+
   def handle_info({:redix_pubsub, _conn, _ref, :subscribed, %{channel: channel}}, state) do
     Logger.info("Embassy.Rails.RedisListener: subscribed to #{channel}")
 
@@ -63,11 +76,17 @@ defmodule Embassy.Rails.RedisListener do
       %{instance: state.instance, channel: channel}
     )
 
-    {:noreply, state}
+    {:noreply, %{state | status: :connected}}
   end
 
-  def handle_info({:redix_pubsub, _conn, _ref, :disconnected, _props}, state) do
-    Logger.warning("Embassy.Rails.RedisListener: disconnected from Redis")
+  def handle_info({:redix_pubsub, _conn, _ref, :disconnected, props}, state) do
+    suffix =
+      case Map.get(props, :reconnect_timeout) do
+        nil -> ""
+        ms -> "; reconnecting in #{ms}ms"
+      end
+
+    Logger.warning("Embassy.Rails.RedisListener: disconnected from Redis#{suffix}")
 
     :telemetry.execute(
       [:embassy_rails, :broadcast, :redis, :disconnected],
@@ -75,7 +94,7 @@ defmodule Embassy.Rails.RedisListener do
       %{instance: state.instance}
     )
 
-    {:noreply, state}
+    {:noreply, %{state | status: :disconnected}}
   end
 
   def handle_info(_msg, state), do: {:noreply, state}
