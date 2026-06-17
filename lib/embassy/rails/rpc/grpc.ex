@@ -98,8 +98,18 @@ if Code.ensure_loaded?(GRPC.Stub) do
     @doc false
     def call(instance, op, request) do
       case GrpcChannel.fetch_channel(instance) do
-        {:ok, channel} -> do_call(channel, op, request)
-        :error -> {:error, :no_channel}
+        {:ok, channel} ->
+          case do_call(channel, op, request) do
+            {:error, {:grpc, _}} = err ->
+              GrpcChannel.reconnect(instance)
+              err
+
+            other ->
+              other
+          end
+
+        :error ->
+          {:error, :no_channel}
       end
     end
 

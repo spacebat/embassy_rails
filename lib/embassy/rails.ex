@@ -148,10 +148,19 @@ defmodule Embassy.Rails do
   @doc false
   def validate_rpc!(rpc, grpc_available?) do
     case Keyword.get(rpc, :transport) do
-      {:grpc, _endpoint} when not grpc_available? ->
-        raise ArgumentError,
-              "Embassy.Rails: rpc transport :grpc requires the :grpc and :protobuf " <>
-                "dependencies; add {:grpc, \"~> 1.0\"} and {:protobuf, \"~> 0.17\"} to your deps"
+      {:grpc, _endpoint} ->
+        unless grpc_available? do
+          raise ArgumentError,
+                "Embassy.Rails: rpc transport :grpc requires the :grpc and :protobuf " <>
+                  "dependencies; add {:grpc, \"~> 1.0\"} and {:protobuf, \"~> 0.17\"} to your deps"
+        end
+
+        if is_nil(Keyword.get(rpc, :secret)) do
+          raise ArgumentError,
+                "Embassy.Rails: rpc transport :grpc requires a :secret (bearer token)"
+        end
+
+        :ok
 
       _ ->
         :ok

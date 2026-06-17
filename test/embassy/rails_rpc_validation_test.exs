@@ -16,6 +16,12 @@ defmodule Embassy.RailsRpcValidationTest do
                )
     end
 
+    test "raises for the :grpc transport when :secret is missing" do
+      assert_raise ArgumentError, ~r/:secret/, fn ->
+        Embassy.Rails.validate_rpc!([transport: {:grpc, "localhost:50051"}], true)
+      end
+    end
+
     test "passes for uds/http regardless of grpc availability" do
       assert :ok ==
                Embassy.Rails.validate_rpc!([transport: {:uds, "/tmp/x.sock"}, secret: "s"], false)

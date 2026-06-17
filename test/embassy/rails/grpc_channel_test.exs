@@ -3,6 +3,7 @@ defmodule Embassy.Rails.GrpcChannelTest do
 
   alias Embassy.Rails.GrpcChannel
   alias Embassy.Rails.Test.GrpcServer
+  alias Embassy.Rails.Test.Helpers
 
   setup do
     instance = :"grpc_chan_#{System.unique_integer([:positive])}"
@@ -18,7 +19,7 @@ defmodule Embassy.Rails.GrpcChannelTest do
 
     start_supervised!({GrpcChannel, instance: instance, endpoint: endpoint, secret: "shh"})
 
-    assert eventually(fn ->
+    assert Helpers.eventually(fn ->
              match?({:ok, %GRPC.Channel{}}, GrpcChannel.fetch_channel(instance))
            end)
   end
@@ -35,7 +36,4 @@ defmodule Embassy.Rails.GrpcChannelTest do
     assert GrpcChannel.fetch_channel(instance) == :error
   end
 
-  defp eventually(fun, tries \\ 50)
-  defp eventually(_fun, 0), do: false
-  defp eventually(fun, tries), do: fun.() || (Process.sleep(20) && eventually(fun, tries - 1))
 end

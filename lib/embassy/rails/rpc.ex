@@ -19,6 +19,7 @@ defmodule Embassy.Rails.RPC do
   """
 
   alias Embassy.Rails.Config
+  alias Embassy.Rails.RPC.Grpc
 
   require Logger
 
@@ -46,8 +47,6 @@ defmodule Embassy.Rails.RPC do
   end
 
   defp grpc_dispatch(instance, op, body, snap) do
-    alias Embassy.Rails.RPC.Grpc
-
     request =
       case op do
         :connect -> Grpc.build_connect_request(body.env)
@@ -67,9 +66,11 @@ defmodule Embassy.Rails.RPC do
 
     case Grpc.call(instance, op, request) do
       {:ok, resp} = ok ->
+        now = System.monotonic_time()
+
         :telemetry.execute(
           [:embassy_rails, :rpc, op, :stop],
-          %{monotonic_time: System.monotonic_time(), duration: System.monotonic_time() - start},
+          %{monotonic_time: now, duration: now - start},
           %{instance: instance, transport: transport, status: resp["status"]}
         )
 
@@ -80,9 +81,11 @@ defmodule Embassy.Rails.RPC do
           "Embassy.Rails.RPC grpc dispatch failed (instance=#{inspect(instance)}, op=#{op}): #{inspect(reason)}"
         )
 
+        now = System.monotonic_time()
+
         :telemetry.execute(
           [:embassy_rails, :rpc, :exception],
-          %{monotonic_time: System.monotonic_time(), duration: System.monotonic_time() - start},
+          %{monotonic_time: now, duration: now - start},
           %{instance: instance, kind: kind_for(op), reason: reason}
         )
 
@@ -111,11 +114,13 @@ defmodule Embassy.Rails.RPC do
 
     case Finch.request(req, snap.finch, receive_timeout: @timeout) do
       {:ok, %Finch.Response{status: 200, body: resp_body}} ->
+        now = System.monotonic_time()
+
         :telemetry.execute(
           [:embassy_rails, :rpc, op, :stop],
           %{
-            monotonic_time: System.monotonic_time(),
-            duration: System.monotonic_time() - start,
+            monotonic_time: now,
+            duration: now - start,
             request_bytes: request_bytes,
             response_bytes: byte_size(resp_body)
           },
@@ -127,11 +132,13 @@ defmodule Embassy.Rails.RPC do
       {:ok, %Finch.Response{status: status, body: resp_body}} ->
         Logger.warning("AnyCable RPC #{path} returned #{status}: #{resp_body}")
 
+        now = System.monotonic_time()
+
         :telemetry.execute(
           [:embassy_rails, :rpc, op, :stop],
           %{
-            monotonic_time: System.monotonic_time(),
-            duration: System.monotonic_time() - start,
+            monotonic_time: now,
+            duration: now - start,
             request_bytes: request_bytes,
             response_bytes: byte_size(resp_body)
           },
@@ -143,11 +150,13 @@ defmodule Embassy.Rails.RPC do
       {:error, reason} ->
         Logger.error("AnyCable RPC #{path} transport error: #{inspect(reason)}")
 
+        now = System.monotonic_time()
+
         :telemetry.execute(
           [:embassy_rails, :rpc, :exception],
           %{
-            monotonic_time: System.monotonic_time(),
-            duration: System.monotonic_time() - start
+            monotonic_time: now,
+            duration: now - start
           },
           %{instance: instance, kind: kind_for(op), reason: reason}
         )

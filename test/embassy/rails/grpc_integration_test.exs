@@ -6,6 +6,7 @@ defmodule Embassy.Rails.GrpcIntegrationTest do
   alias Embassy.Rails.GrpcChannel
   alias Embassy.Rails.RPC
   alias Embassy.Rails.Test.GrpcServer
+  alias Embassy.Rails.Test.Helpers
 
   setup do
     instance = :"grpc_int_#{System.unique_integer([:positive])}"
@@ -24,7 +25,7 @@ defmodule Embassy.Rails.GrpcIntegrationTest do
        broadcast: [source: :http, key: "bcast"]}
     )
 
-    assert eventually(fn ->
+    assert Helpers.eventually(fn ->
              match?({:ok, _}, GrpcChannel.fetch_channel(instance))
            end)
 
@@ -55,7 +56,4 @@ defmodule Embassy.Rails.GrpcIntegrationTest do
     assert resp["streams"] == ["chat:1"]
   end
 
-  defp eventually(fun, tries \\ 50)
-  defp eventually(_fun, 0), do: false
-  defp eventually(fun, tries), do: fun.() || (Process.sleep(20) && eventually(fun, tries - 1))
 end

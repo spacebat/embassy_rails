@@ -30,6 +30,16 @@ if Code.ensure_loaded?(GRPC.Stub) do
         {:ok, %GRPC.Channel{} = channel} -> {:ok, channel}
         _ -> :error
       end
+    rescue
+      ArgumentError -> :error
+    end
+
+    @doc false
+    def reconnect(instance) do
+      case GenServer.whereis(via(instance)) do
+        nil -> :ok
+        pid -> send(pid, :reconnect)
+      end
     end
 
     defp via(instance), do: {:via, Registry, {Embassy.Rails.registry_name(instance), __MODULE__}}
@@ -40,7 +50,6 @@ if Code.ensure_loaded?(GRPC.Stub) do
         instance: Keyword.fetch!(opts, :instance),
         endpoint: Keyword.fetch!(opts, :endpoint),
         secret: Keyword.fetch!(opts, :secret),
-        channel: nil,
         backoff: @backoff_start
       }
 
@@ -57,6 +66,8 @@ if Code.ensure_loaded?(GRPC.Stub) do
     def handle_info(_msg, state), do: {:noreply, state}
 
     defp connect(state) do
+      Registry.put_meta(Embassy.Rails.registry_name(state.instance), :grpc_channel, nil)
+
       opts = [
         adapter: GRPC.Client.Adapters.Mint,
         headers: [{"authorization", "Bearer " <> state.secret}]
@@ -65,17 +76,15 @@ if Code.ensure_loaded?(GRPC.Stub) do
       case GRPC.Stub.connect(state.endpoint, opts) do
         {:ok, channel} ->
           Registry.put_meta(Embassy.Rails.registry_name(state.instance), :grpc_channel, channel)
-          %{state | channel: channel, backoff: @backoff_start}
+          %{state | backoff: @backoff_start}
 
         {:error, reason} ->
-          Registry.put_meta(Embassy.Rails.registry_name(state.instance), :grpc_channel, nil)
-
           Logger.warning(
             "Embassy.Rails.GrpcChannel(#{inspect(state.instance)}): connect failed: #{inspect(reason)}; retrying in #{state.backoff}ms"
           )
 
           Process.send_after(self(), :reconnect, state.backoff)
-          %{state | channel: nil, backoff: min(state.backoff * 2, @backoff_max)}
+          %{state | backoff: min(state.backoff * 2, @backoff_max)}
       end
     end
   end
