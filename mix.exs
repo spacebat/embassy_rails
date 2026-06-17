@@ -47,16 +47,17 @@ defmodule EmbassyRails.MixProject do
     ]
   end
 
-  # embassy is a sibling package in the embassy family. Locally it is a path
-  # dependency so edits flow in without a republish; at publish time
-  # (EMBASSY_PUBLISH=1) it resolves from the spacebat registry as a normal
-  # versioned hex dependency, which is what gets baked into the released
-  # package metadata. See ~/.claude/skills/using-spacebat-hex-registry.
+  # embassy is a sibling package in the embassy family. By default it
+  # resolves from the spacebat local registry as a normal versioned hex
+  # dependency, which is also what gets baked into the released package
+  # metadata. For local cross-package development set EMBASSY_PATH=1 to use
+  # a path dependency instead, so edits to ../embassy flow in without a
+  # republish. See ~/.claude/skills/using-spacebat-hex-registry.
   defp embassy_dep do
-    if System.get_env("EMBASSY_PUBLISH") do
-      {:embassy, "~> 0.2", repo: "spacebat"}
-    else
+    if System.get_env("EMBASSY_PATH") do
       {:embassy, path: "../embassy"}
+    else
+      {:embassy, "~> 0.2", repo: "spacebat"}
     end
   end
 
