@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }}
+    runs-on: ubuntu-24.04
+    env:
+      MIX_ENV: test
+      # embassy normally comes from the spacebat local registry, which a
+      # runner can't reach. Build against spacebat/embassy main as a path
+      # dep instead (see embassy_dep/0 in mix.exs).
+      EMBASSY_PATH: "1"
+    defaults:
+      run:
+        working-directory: embassy_rails
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Oldest supported (mix.exs requires ~> 1.19): tests only.
+          - elixir: "1.19"
+            otp: "28"
+          # Latest: the full `mix ci` gate (format output can differ by version).
+          - elixir: "1.20"
+            otp: "29"
+            full: true
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: embassy_rails
+
+      - uses: actions/checkout@v4
+        with:
+          repository: spacebat/embassy
+          ref: main
+          path: embassy
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ matrix.elixir }}
+          otp-version: ${{ matrix.otp }}
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            embassy_rails/deps
+            embassy_rails/_build
+          key: mix-${{ runner.os }}-${{ matrix.elixir }}-${{ matrix.otp }}-${{ hashFiles('embassy_rails/mix.lock') }}
+          restore-keys: mix-${{ runner.os }}-${{ matrix.elixir }}-${{ matrix.otp }}-
+
+      # The lock pins embassy to the "spacebat" repo, which isn't configured
+      # here; drop that entry so the path dep resolves cleanly.
+      - run: mix deps.unlock embassy
+
+      - run: mix deps.get
+
+      - if: matrix.full
+        run: mix ci
+
+      - if: ${{ !matrix.full }}
+        run: mix test

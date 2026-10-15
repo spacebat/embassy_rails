@@ -12,11 +12,21 @@ defmodule EmbassyRails.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps(),
+      aliases: aliases(),
+      hex: [
+        # cowlib is only pulled in by bypass (test-only) and has no fixed
+        # release yet; library consumers resolve their own cowlib.
+        ignore_advisories: ["EEF-CVE-2026-43966"]
+      ],
       description: description(),
       package: package(),
       docs: docs(),
       source_url: @source_url
     ]
+  end
+
+  def cli do
+    [preferred_envs: [ci: :test]]
   end
 
   def application do
@@ -27,6 +37,22 @@ defmodule EmbassyRails.MixProject do
 
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]
+
+  # `mix ci` is what GitHub Actions runs. Dialyzer is deliberately not in it;
+  # run `mix dialyzer` by hand.
+  defp aliases do
+    [
+      ci: [
+        "deps.unlock --check-unused",
+        "hex.audit",
+        "format --check-formatted",
+        "compile --warnings-as-errors --force",
+        "credo",
+        "sobelow --skip --exit",
+        "test --warnings-as-errors"
+      ]
+    ]
+  end
 
   defp deps do
     [
@@ -43,7 +69,10 @@ defmodule EmbassyRails.MixProject do
       {:telemetry, "~> 1.2"},
       {:bypass, "~> 2.1", only: :test},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
-      {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
+      {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},
+      {:ex_slop, "~> 0.4", only: [:dev, :test], runtime: false}
     ]
   end
 

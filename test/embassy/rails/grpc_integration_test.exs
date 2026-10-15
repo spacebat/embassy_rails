@@ -55,5 +55,4 @@ defmodule Embassy.Rails.GrpcIntegrationTest do
     assert resp["status"] == 1
     assert resp["streams"] == ["chat:1"]
   end
-
 end

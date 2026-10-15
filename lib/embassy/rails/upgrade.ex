@@ -40,17 +40,15 @@ defmodule Embassy.Rails.Upgrade do
 
   @impl Plug
   def call(conn, %{embassy_rails: instance, subprotocols: subprotocols}) do
-    cond do
-      not websocket_upgrade?(conn) ->
-        reject(conn, instance, :not_an_upgrade, [])
+    if websocket_upgrade?(conn) do
+      requested = requested_subprotocols(conn)
 
-      true ->
-        requested = requested_subprotocols(conn)
-
-        case Enum.find(subprotocols, &(&1 in requested)) do
-          nil -> reject(conn, instance, :no_subprotocol, requested)
-          chosen -> do_upgrade(conn, instance, chosen)
-        end
+      case Enum.find(subprotocols, &(&1 in requested)) do
+        nil -> reject(conn, instance, :no_subprotocol, requested)
+        chosen -> do_upgrade(conn, instance, chosen)
+      end
+    else
+      reject(conn, instance, :not_an_upgrade, [])
     end
   end
 

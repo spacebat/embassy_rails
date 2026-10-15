@@ -35,5 +35,4 @@ defmodule Embassy.Rails.GrpcChannelTest do
     assert Process.alive?(pid)
     assert GrpcChannel.fetch_channel(instance) == :error
   end
-
 end

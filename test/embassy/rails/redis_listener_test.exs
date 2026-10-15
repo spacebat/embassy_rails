@@ -53,7 +53,13 @@ defmodule Embassy.Rails.RedisListenerTest do
     test "decodes a message and fans it out via dispatch", %{instance: instance} do
       Phoenix.PubSub.subscribe(__MODULE__.PubSub, Broadcast.topic("chat:1"))
 
-      state = %{instance: instance, channel: "__anycable__", conn: nil, ref: nil, status: :connected}
+      state = %{
+        instance: instance,
+        channel: "__anycable__",
+        conn: nil,
+        ref: nil,
+        status: :connected
+      }
 
       msg =
         {:redix_pubsub, self(), make_ref(), :message,
@@ -87,7 +93,13 @@ defmodule Embassy.Rails.RedisListenerTest do
       {:ok, collector} =
         TelemetryCollector.attach([[:embassy_rails, :broadcast, :redis, :reconnected]])
 
-      state = %{instance: :inst, channel: "__anycable__", conn: nil, ref: nil, status: :disconnected}
+      state = %{
+        instance: :inst,
+        channel: "__anycable__",
+        conn: nil,
+        ref: nil,
+        status: :disconnected
+      }
 
       msg = {:redix_pubsub, self(), make_ref(), :subscribed, %{channel: "__anycable__"}}
       assert {:noreply, %{status: :connected}} = RedisListener.handle_info(msg, state)

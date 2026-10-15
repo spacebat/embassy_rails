@@ -54,8 +54,10 @@ defmodule Embassy.Rails.RedisListener do
     {:noreply, state}
   end
 
-  def handle_info({:redix_pubsub, _conn, _ref, :subscribed, %{channel: channel}},
-                  %{status: :disconnected} = state) do
+  def handle_info(
+        {:redix_pubsub, _conn, _ref, :subscribed, %{channel: channel}},
+        %{status: :disconnected} = state
+      ) do
     Logger.info("Embassy.Rails.RedisListener: reconnected to #{channel}")
 
     :telemetry.execute(
