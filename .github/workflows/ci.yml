@@ -57,6 +57,10 @@ jobs:
           key: mix-${{ runner.os }}-${{ matrix.elixir }}-${{ matrix.otp }}-${{ hashFiles('embassy_rails/mix.lock') }}
           restore-keys: mix-${{ runner.os }}-${{ matrix.elixir }}-${{ matrix.otp }}-
 
+      # The installer tests build a throwaway Phoenix app via Igniter, which
+      # needs the phx_new archive (Phx.New.Generator) on the runner.
+      - run: mix archive.install hex phx_new --force
+
       # The lock pins embassy to the "spacebat" repo, which isn't configured
       # here; drop that entry so the path dep resolves cleanly.
       - run: mix deps.unlock embassy
