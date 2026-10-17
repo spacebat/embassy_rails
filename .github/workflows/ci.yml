@@ -18,6 +18,17 @@ jobs:
       # runner can't reach. Build against spacebat/embassy main as a path
       # dep instead (see embassy_dep/0 in mix.exs).
       EMBASSY_PATH: "1"
+      # Enables the :redis-tagged tests (see test/test_helper.exs).
+      REDIS_URL: redis://localhost:6379/15
+    services:
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 10
     defaults:
       run:
         working-directory: embassy_rails

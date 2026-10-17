@@ -46,8 +46,13 @@ defmodule Embassy.Rails.BroadcastTest do
 
     assert_receive {:cable_broadcast, "s", %{data: 1}}, 100
 
-    assert [{[:embassy_rails, :broadcast, :received], _meas, %{scope: :cluster}}] =
-             TelemetryCollector.events(collector)
+    # Telemetry handlers are global; other async tests emit :received too.
+    assert [%{scope: :cluster}] =
+             for(
+               {_event, _meas, %{instance: ^instance} = meta} <-
+                 TelemetryCollector.events(collector),
+               do: meta
+             )
   end
 
   test "dispatch/3 does not deliver to subscribers of a different stream", %{instance: instance} do
