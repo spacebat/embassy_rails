@@ -20,7 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   broadcaster (`Embassy.Rails.RedisStreamListener`), with anycable-go's
   defaults (stream `"__anycable__"`, consumer group `"bx"`, 2000 ms block):
   `XREADGROUP`, `XAUTOCLAIM` of a dead consumer's entries, `XACK` + `XDEL`
-  per entry, group recreated after `NOGROUP`. At-least-once delivery.
+  per entry, group recreated at `0` after `NOGROUP` or `UNBLOCKED` so
+  nothing added meanwhile is lost. At-least-once delivery.
   `mix embassy_rails.install --source redisx [--stream ...]`.
 - AnyCable presence (`Embassy.Rails.Presence`), cluster-wide on
   `Phoenix.Tracker`: `join_presence` / `leave_presence` from Rails, the
@@ -41,19 +42,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Graceful WebSocket drain: `{Embassy.Rails.Drain, instance: ...,
   window_ms: 60_000, batches: 20}`, started after the Endpoint, sends every
   connection a reconnecting `server_restart` disconnect in batches across
-  the window, and flips readiness to false.
+  the window, waits one more interval for them to close, and flips
+  readiness to false. `Embassy.Rails.Upgrade` answers 503 while draining.
 - `Embassy.Rails.Health.ready?/1`: readiness probe, false while draining
   or when the AnyCable RPC is unreachable.
 - `Embassy.Rails.connections_name/1`: duplicate-key Registry of live
   connections (key `:conn`).
-- `ping_interval:` (default 3000 ms, `:infinity` disables) and
-  `max_mailbox:` (default 1000; slow clients are disconnected with
-  `slow_client`) instance options.
+- `ping_interval:` (default 3000 ms, `:infinity` disables),
+  `max_mailbox:` (default 1000) and `slow_client_ms:` (default 5000; a
+  client over `max_mailbox` that long is disconnected with `slow_client`)
+  instance options, validated at start.
 - `Embassy.Rails.Telemetry.metrics/0`: `Telemetry.Metrics` definitions
   (optional `:telemetry_metrics` dependency).
 - Telemetry `[:embassy_rails, :broadcast, :redisx, _]` and
   `[:embassy_rails, :presence, :join | :leave]`; `[:embassy_rails,
   :broadcast, :received]` metadata gains `scope`.
+
+### Changed
+
+- `:http` broadcasts are re-broadcast cluster-wide (they were node-local),
+  since Rails posts each one to a single load-balanced node. A multi-node
+  deployment on the HTTP source now needs a clustered `Phoenix.PubSub`.
+- Presence is on by default (`presence: false` turns it off).
+- `Embassy.Rails.Upgrade` prefers `actioncable-v1-ext-json` when the
+  client offers it (the default list was `["actioncable-v1-json"]`).
+- `Embassy.Rails.RedisListener.decode_anycable/1` is removed; envelope
+  decoding is internal and accepts batched (array) payloads.
 
 ### Fixed
 
@@ -62,7 +76,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Command replies carry only the `cstate` / `istate` keys that changed;
   they are now merged into the connection state instead of replacing it.
 - `wss://` is reported to the RPC behind a TLS-terminating proxy
-  (`x-forwarded-proto`, `x-forwarded-ssl`).
+  (`x-forwarded-proto`, including a comma list, and `x-forwarded-ssl`).
+- Channel `istate` is kept per channel identifier, as anycable-go does,
+  instead of one map shared by every channel on the connection.
+- `Embassy.Rails.BroadcastPlug` compares the bearer in constant time.
 
 ## [0.2.0] - 2026-06-16
 
