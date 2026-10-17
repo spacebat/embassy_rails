@@ -108,24 +108,35 @@ defmodule Embassy.Rails.RedisStreamListenerIntegrationTest do
     assert_receive {:redisx, :claimed, %{count: 1}, %{consumer: "c1"}}, 1_000
   end
 
-  test "recreates a destroyed group", ctx do
+  test "recreates a destroyed group without losing entries added before it is back", ctx do
     start_listener(ctx, consumer: "c1")
     assert_receive {:redisx, :connected, _, _}, 1_000
     Phoenix.PubSub.subscribe(__MODULE__.PubSub, Broadcast.topic("back"))
 
-    Redix.command!(ctx.redis, ["XGROUP", "DESTROY", ctx.stream, "bx"])
+    # The entry lands while no group exists, before the listener regroups.
+    Redix.transaction_pipeline!(ctx.redis, [
+      ["XGROUP", "DESTROY", ctx.stream, "bx"],
+      ["XADD", ctx.stream, "*", "payload", envelope("back", "again")]
+    ])
 
-    # A recreated group starts at `$` (as in anycable-go), so wait for it
-    # before adding the entry.
-    eventually(fn ->
-      ctx.redis
-      |> Redix.command!(["XINFO", "GROUPS", ctx.stream])
-      |> Enum.any?(&match?(["name", "bx" | _], &1))
-    end)
-
-    xadd_payload(ctx.redis, ctx.stream, envelope("back", "again"))
     assert_receive {:cable_broadcast, "back", %{data: "again"}}, 1_000
     # NOGROUP is a regroup, not a connection failure.
+    refute_received {:redisx, :disconnected, _, _}
+  end
+
+  test "regroups when the stream key is deleted under a blocked read", ctx do
+    start_listener(ctx, consumer: "c1", block_ms: 1_000)
+    assert_receive {:redisx, :connected, _, _}, 1_000
+    Phoenix.PubSub.subscribe(__MODULE__.PubSub, Broadcast.topic("gone"))
+    # Let the listener block in XREADGROUP.
+    Process.sleep(100)
+
+    Redix.transaction_pipeline!(ctx.redis, [
+      ["DEL", ctx.stream],
+      ["XADD", ctx.stream, "*", "payload", envelope("gone", "kept")]
+    ])
+
+    assert_receive {:cable_broadcast, "gone", %{data: "kept"}}, 2_000
     refute_received {:redisx, :disconnected, _, _}
   end
 

@@ -29,4 +29,18 @@ defmodule Embassy.Rails.RedisStreamListenerTest do
       assert RedisStreamListener.parse_autoclaim_reply(reply) == [{"1-0", %{"payload" => "x"}}]
     end
   end
+
+  test "the child spec's shutdown outlasts a blocked read" do
+    spec =
+      Embassy.Rails.RedisStreamListener.child_spec(
+        instance: :i,
+        redis: "redis://x",
+        block_ms: 10_000
+      )
+
+    assert spec.shutdown > 10_000
+
+    assert Embassy.Rails.RedisStreamListener.child_spec(instance: :i, redis: "redis://x").shutdown >
+             2_000
+  end
 end

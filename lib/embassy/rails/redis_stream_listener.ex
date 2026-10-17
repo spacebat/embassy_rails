@@ -13,7 +13,9 @@ defmodule Embassy.Rails.RedisStreamListener do
   and the entry field `"payload"`. The listener:
 
     * creates the group at `$` with `MKSTREAM` (an existing group is
-      fine), and recreates it the same way if it disappears
+      fine). If the group disappears (`NOGROUP`, or `UNBLOCKED` when the
+      stream key is deleted) it is recreated at `0`, so entries added
+      while it was gone are still delivered
     * reads with `XREADGROUP ... BLOCK`
     * every block period, reclaims entries that another consumer left
       pending for longer than the block period (`XAUTOCLAIM`)
@@ -74,6 +76,14 @@ defmodule Embassy.Rails.RedisStreamListener do
   @default_block_ms 2_000
   @read_count 100
   @max_backoff_ms 30_000
+
+  @doc false
+  # A shutdown waits for a blocked XREADGROUP to return before terminate/2
+  # can remove the consumer, so it must outlast the block.
+  def child_spec(opts) do
+    block_ms = Keyword.get(opts, :block_ms) || @default_block_ms
+    Map.put(super(opts), :shutdown, block_ms + 5_000)
+  end
 
   @doc false
   def start_link(opts) do
@@ -164,12 +174,25 @@ defmodule Embassy.Rails.RedisStreamListener do
   defp ensure_group(%{status: :connected} = state), do: {:ok, state}
 
   defp ensure_group(state) do
-    case command(state, ["XGROUP", "CREATE", state.stream, state.group, "$", "MKSTREAM"]) do
+    case command(state, [
+           "XGROUP",
+           "CREATE",
+           state.stream,
+           state.group,
+           group_start(state),
+           "MKSTREAM"
+         ]) do
       {:ok, _} -> {:ok, connected(state)}
       {:error, %Redix.Error{message: "BUSYGROUP" <> _}} -> {:ok, connected(state)}
       {:error, error} -> {:error, error, state}
     end
   end
+
+  # A new group starts at `$`, as in anycable-go. A lost group restarts at
+  # `0`: consumed entries are deleted, so all that is left is undelivered,
+  # including what was added while the group was gone.
+  defp group_start(%{status: :initial}), do: "$"
+  defp group_start(_state), do: "0"
 
   defp maybe_claim(state) do
     now = System.monotonic_time(:millisecond)
