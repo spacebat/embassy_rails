@@ -74,7 +74,8 @@ if Code.ensure_loaded?(GRPC.Stub) do
         "streams" => resp.streams || [],
         "transmissions" => resp.transmissions || [],
         "stopped_streams" => resp.stopped_streams || [],
-        "env" => env_response(resp.env)
+        "env" => env_response(resp.env),
+        "presence" => presence_response(resp.presence)
       }
     end
 
@@ -86,6 +87,13 @@ if Code.ensure_loaded?(GRPC.Stub) do
     # The generated enum decodes to an atom; Connection matches the integer.
     defp status_int(status) when is_integer(status), do: status
     defp status_int(status) when is_atom(status), do: Anycable.Status.value(status)
+
+    defp presence_response(nil), do: nil
+
+    defp presence_response(%Anycable.PresenceResponse{} = presence) do
+      info = if presence.info in [nil, ""], do: nil, else: presence.info
+      %{"type" => presence.type, "id" => presence.id, "info" => info}
+    end
 
     defp env_response(nil), do: %{"cstate" => %{}, "istate" => %{}}
 

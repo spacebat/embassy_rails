@@ -58,8 +58,35 @@ defmodule Embassy.Rails.RPC.GrpcTest do
                "streams" => ["chat:1"],
                "transmissions" => [~s({"type":"confirm"})],
                "stopped_streams" => ["chat:0"],
-               "env" => %{"cstate" => %{}, "istate" => %{}}
+               "env" => %{"cstate" => %{}, "istate" => %{}},
+               "presence" => nil
              }
+    end
+
+    test "maps presence" do
+      resp = %Anycable.CommandResponse{
+        status: :SUCCESS,
+        presence: %Anycable.PresenceResponse{type: "join", id: "2024", info: ~s({"name":"Bart"})}
+      }
+
+      assert %{"presence" => %{"type" => "join", "id" => "2024", "info" => ~s({"name":"Bart"})}} =
+               Grpc.normalize_command(resp)
+    end
+
+    test "maps empty info to nil and absent presence to nil" do
+      leave = %Anycable.CommandResponse{
+        status: :SUCCESS,
+        presence: %Anycable.PresenceResponse{type: "leave", id: "1"}
+      }
+
+      assert Grpc.normalize_command(leave)["presence"] == %{
+               "type" => "leave",
+               "id" => "1",
+               "info" => nil
+             }
+
+      assert Grpc.normalize_command(%Anycable.CommandResponse{status: :SUCCESS})["presence"] ==
+               nil
     end
   end
 

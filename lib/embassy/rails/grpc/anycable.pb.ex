@@ -94,6 +94,17 @@ defmodule Anycable.CommandMessage do
   field(:env, 5, type: Anycable.Env)
 end
 
+defmodule Anycable.PresenceResponse do
+  @moduledoc false
+
+  use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.17.0"
+
+  field(:type, 1, type: :string)
+  field(:id, 2, type: :string)
+  field(:info, 3, type: :string)
+  field(:ttl, 4, type: :uint32)
+end
+
 defmodule Anycable.CommandResponse do
   @moduledoc false
   use Protobuf, syntax: :proto3, protoc_gen_elixir_version: "0.17.0"
@@ -106,6 +117,7 @@ defmodule Anycable.CommandResponse do
   field(:error_msg, 6, type: :string, json_name: "errorMsg")
   field(:env, 7, type: Anycable.EnvResponse)
   field(:stopped_streams, 8, repeated: true, type: :string, json_name: "stoppedStreams")
+  field(:presence, 9, type: Anycable.PresenceResponse)
 end
 
 defmodule Anycable.DisconnectRequest do
