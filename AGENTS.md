@@ -37,7 +37,8 @@ These are independent hex packages composed at the consumer level.
 - **No authorship attribution in commits.** No `Co-Authored-By`
   trailers, no Claude attribution.
 - Elixir 1.19+.
-- **No dialyxir.**
+- **Dialyxir is manual only.** Run `mix dialyzer` by hand; it is not part
+  of `mix ci` or GitHub Actions.
 - No emojis anywhere — code, comments, commit messages, docs.
 - The user controls when commits happen.
 
