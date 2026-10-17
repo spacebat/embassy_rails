@@ -69,8 +69,9 @@ It composes embassy's installer for the Finch + Embassy base, then adds a
 `Phoenix.PubSub`, an `Embassy.Rails` instance, and a router scope
 (`/cable` WebSocket upgrade, an optional `/_broadcast` endpoint for the
 HTTP broadcast source, and the `/` reverse proxy). Use
-`--source redis` to wire the Redis broadcast source instead (adds
-`{:redix, "~> 1.0"}`). Pass `--yes` for non-interactive defaults.
+`--source redisx` (Redis Streams, with an optional `--stream`) or
+`--source redis` (Pub/Sub) to wire a Redis broadcast source instead
+(adds `{:redix, "~> 1.0"}`). Pass `--yes` for non-interactive defaults.
 
 ## Installation
 

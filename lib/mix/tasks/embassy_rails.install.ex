@@ -12,8 +12,9 @@ if Code.ensure_loaded?(Igniter.Mix.Task) do
 
     Flags: `--name`, `--embassy`, `--pubsub`, `--finch`,
     `--transport uds|http`, `--address`, `--secret`,
-    `--source http|redis`, `--key`, `--redis-url`, `--channel`. `--yes`
-    takes defaults non-interactively.
+    `--source http|redis|redisx`, `--key`, `--redis-url`, `--channel`
+    (redis), `--stream` (redisx). `--yes` takes defaults
+    non-interactively.
     """
 
     use Igniter.Mix.Task
@@ -41,6 +42,7 @@ if Code.ensure_loaded?(Igniter.Mix.Task) do
           key: :string,
           redis_url: :string,
           channel: :string,
+          stream: :string,
           yes: :boolean
         ]
       }
@@ -77,7 +79,7 @@ if Code.ensure_loaded?(Igniter.Mix.Task) do
       transport = resolve(options, :transport, "uds", "Transport (uds/http)", yes?)
       address = resolve(options, :address, default_address(transport), "Backend address", yes?)
       secret = resolve(options, :secret, @placeholder_secret, "AnyCable RPC secret", yes?)
-      source = resolve(options, :source, "http", "Broadcast source (http/redis)", yes?)
+      source = resolve(options, :source, "http", "Broadcast source (http/redis/redisx)", yes?)
 
       name =
         parse_module(
@@ -137,6 +139,18 @@ if Code.ensure_loaded?(Igniter.Mix.Task) do
         case Keyword.get(options, :channel) do
           nil -> [source: :redis, redis: redis_url]
           channel -> [source: :redis, redis: redis_url, channel: channel]
+        end
+
+      {broadcast, nil}
+    end
+
+    defp resolve_broadcast(options, "redisx", yes?) do
+      redis_url = resolve(options, :redis_url, "redis://localhost:6379/1", "Redis URL", yes?)
+
+      broadcast =
+        case Keyword.get(options, :stream) do
+          nil -> [source: :redisx, redis: redis_url]
+          stream -> [source: :redisx, redis: redis_url, stream: stream]
         end
 
       {broadcast, nil}
@@ -241,7 +255,7 @@ if Code.ensure_loaded?(Igniter.Mix.Task) do
 
     # --- broadcast deps --------------------------------------------------
 
-    defp add_broadcast_deps(igniter, %{source: "redis"}) do
+    defp add_broadcast_deps(igniter, %{source: source}) when source in ["redis", "redisx"] do
       Igniter.Project.Deps.add_dep(igniter, {:redix, "~> 1.0"})
     end
 
@@ -283,6 +297,17 @@ if Code.ensure_loaded?(Igniter.Mix.Task) do
       AnyCable's Redis broadcaster at the channel (default
       #{@default_channel}) and make sure the Redis URL is reachable from
       every terminator node.
+      """)
+    end
+
+    defp source_notice(igniter, %{source: "redisx"}) do
+      Igniter.add_notice(igniter, """
+      Embassy.Rails: the :redisx broadcast source needs the :redix
+      dependency, which was added to mix.exs -- run `mix deps.get`. In Rails,
+      set `broadcast_adapter: redisx` in config/anycable.yml (or
+      ANYCABLE_BROADCAST_ADAPTER=redisx). Each broadcast is delivered to one
+      terminator node, so a multi-node deployment needs a clustered
+      Phoenix.PubSub for it to reach every node.
       """)
     end
 

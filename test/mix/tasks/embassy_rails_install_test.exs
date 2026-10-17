@@ -150,6 +150,42 @@ defmodule Mix.Tasks.EmbassyRails.InstallTest do
       assert content =~ "Embassy.Rails.Upgrade"
     end
 
+    defp install_redisx(extra) do
+      phx_test_project()
+      |> Igniter.compose_task(
+        "embassy_rails.install",
+        base_args(["--source", "redisx", "--redis-url", "redis://localhost:6379/1"]) ++ extra
+      )
+    end
+
+    test "writes the redisx broadcast config and adds the redix dep" do
+      igniter = install_redisx([])
+      app = rendered(igniter, "lib/test/application.ex")
+      mix = rendered(igniter, "mix.exs")
+
+      assert app =~ "source: :redisx"
+      assert app =~ "redis: \"redis://localhost:6379/1\""
+      assert mix =~ ~s({:redix, "~> 1.0"})
+    end
+
+    test "--stream is written for redisx" do
+      app = rendered(install_redisx(["--stream", "custom"]), "lib/test/application.ex")
+      assert app =~ "stream: \"custom\""
+    end
+
+    test "does not add a /_broadcast route for the redisx source" do
+      content = rendered(install_redisx([]), "lib/test_web/router.ex")
+      refute content =~ "Embassy.Rails.BroadcastPlug"
+      assert content =~ "Embassy.Rails.Upgrade"
+    end
+
+    test "redisx source emits a notice naming the Rails adapter and clustered PubSub" do
+      assert_has_notice(
+        install_redisx([]),
+        &(&1 =~ "broadcast_adapter: redisx" and &1 =~ "Phoenix.PubSub")
+      )
+    end
+
     test "http source does not add the redix dep" do
       mix = rendered(install([]), "mix.exs")
       refute mix =~ ":redix"
