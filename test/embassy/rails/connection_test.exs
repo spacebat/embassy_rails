@@ -545,4 +545,79 @@ defmodule Embassy.Rails.ConnectionTest do
       assert_receive {:cable_presence, "j", %{"info" => "plain"}}, 500
     end
   end
+
+  describe "drain, ping interval and mailbox cap" do
+    defp start_tuned_instance(name, extra) do
+      start_supervised!(
+        {Embassy.Rails,
+         [
+           name: name,
+           embassy: Embassy.Rails.ConnectionTest.Embassy,
+           pubsub: Embassy.Rails.ConnectionTest.PubSub,
+           rpc: [transport: {:http, "http://localhost:1"}, secret: "shh"],
+           broadcast: [source: :http, key: "bcast"]
+         ] ++ extra},
+        id: name
+      )
+
+      name
+    end
+
+    test "drain message pushes a reconnecting disconnect and closes", %{state: state} do
+      assert {:stop, :normal, {1001, "server_restart"}, [{:text, frame}], _} =
+               Connection.handle_info(:embassy_rails_drain, state)
+
+      assert Jason.decode!(frame) == %{
+               "type" => "disconnect",
+               "reason" => "server_restart",
+               "reconnect" => true
+             }
+    end
+
+    test "init registers the connection", %{bypass: bypass, state: state} do
+      Bypass.expect_once(bypass, "POST", "/_anycable/connect", fn conn ->
+        Plug.Conn.resp(conn, 200, ~s({"status":1,"identifiers":"abc","transmissions":[]}))
+      end)
+
+      assert {:push, _, _} = Connection.init(state)
+
+      assert {self(), nil} in Registry.lookup(
+               Embassy.Rails.connections_name(state.instance),
+               :conn
+             )
+    end
+
+    test "ping uses the instance's ping_interval", %{state: state} do
+      instance = start_tuned_instance(__MODULE__.FastPing, ping_interval: 20)
+
+      assert {:push, {:text, _}, _} = Connection.handle_info(:ping, %{state | instance: instance})
+      assert_receive :ping, 200
+    end
+
+    test "ping_interval :infinity disables pings", %{state: state} do
+      instance = start_tuned_instance(__MODULE__.NoPing, ping_interval: :infinity)
+
+      assert {:push, {:text, _}, _} = Connection.handle_info(:ping, %{state | instance: instance})
+      refute_receive :ping, 50
+    end
+
+    test "a slow client over max_mailbox is disconnected", %{state: state} do
+      instance = start_tuned_instance(__MODULE__.SmallMailbox, max_mailbox: 3)
+      state = %{state | instance: instance, streams: %{"s" => "id"}}
+
+      for _ <- 1..5, do: send(self(), :filler)
+
+      assert {:stop, :normal, {1008, "slow_client"}, [{:text, frame}], _} =
+               Connection.handle_info({:cable_broadcast, "s", %{data: "x"}}, state)
+
+      assert Jason.decode!(frame)["reason"] == "slow_client"
+    end
+
+    test "a client under max_mailbox gets the broadcast", %{state: state} do
+      state = %{state | streams: %{"s" => "id"}}
+
+      assert {:push, {:text, _}, _} =
+               Connection.handle_info({:cable_broadcast, "s", %{data: "x"}}, state)
+    end
+  end
 end

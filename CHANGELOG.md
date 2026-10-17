@@ -15,6 +15,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with no HTTP RPC shim. Requires the optional `:grpc` and `:protobuf`
   dependencies. The transport is transparent to `Embassy.Rails.Connection`.
 
+- Graceful WebSocket drain: `{Embassy.Rails.Drain, instance: ...,
+  window_ms: 60_000, batches: 20}`, started after the Endpoint, sends every
+  connection a reconnecting `server_restart` disconnect in batches across
+  the window, and flips readiness to false.
+- `Embassy.Rails.Health.ready?/1`: readiness probe, false while draining
+  or when the AnyCable RPC is unreachable.
+- `Embassy.Rails.connections_name/1`: duplicate-key Registry of live
+  connections (key `:conn`).
+- `ping_interval:` (default 3000 ms, `:infinity` disables) and
+  `max_mailbox:` (default 1000; slow clients are disconnected with
+  `slow_client`) instance options.
+
 ## [0.2.0] - 2026-06-16
 
 ### Added

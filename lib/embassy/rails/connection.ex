@@ -36,8 +36,6 @@ defmodule Embassy.Rails.Connection do
 
   require Logger
 
-  @ping_interval 3_000
-
   @impl WebSock
   def init(state) do
     case RPC.connect(state.instance, build_env(state)) do
@@ -50,7 +48,8 @@ defmodule Embassy.Rails.Connection do
           %{instance: state.instance, channel_identifier: state.identifiers}
         )
 
-        schedule_ping()
+        Registry.register(Embassy.Rails.connections_name(state.instance), :conn, nil)
+        schedule_ping(state)
         {:push, connect_frames(resp["transmissions"] || []), state}
 
       {:ok, %{"status" => 2}} ->
@@ -94,20 +93,30 @@ defmodule Embassy.Rails.Connection do
   @impl WebSock
   def handle_info(:ping, state) do
     frame = {:text, Jason.encode!(%{type: "ping", message: System.system_time(:second)})}
-    schedule_ping()
+    schedule_ping(state)
     {:push, frame, state}
   end
 
   def handle_info({:cable_broadcast, stream, payload}, state) do
-    with identifier when not is_nil(identifier) <- state.streams[stream],
-         false <- payload[:exclude_socket] == state.socket_id do
-      frame =
-        Jason.encode!(%{identifier: identifier, message: decode_data(payload[:data])})
+    {:message_queue_len, queued} = Process.info(self(), :message_queue_len)
 
-      {:push, {:text, frame}, state}
+    if queued > Config.snapshot(state.instance).max_mailbox do
+      Logger.warning("Embassy.Rails.Connection: slow client, #{queued} queued; disconnecting")
+
+      frame =
+        {:text, Jason.encode!(%{type: "disconnect", reason: "slow_client", reconnect: true})}
+
+      {:stop, :normal, {1008, "slow_client"}, [frame], state}
     else
-      _ -> {:ok, state}
+      push_broadcast(stream, payload, state)
     end
+  end
+
+  def handle_info(:embassy_rails_drain, state) do
+    frame =
+      {:text, Jason.encode!(%{type: "disconnect", reason: "server_restart", reconnect: true})}
+
+    {:stop, :normal, {1001, "server_restart"}, [frame], state}
   end
 
   def handle_info({:cable_presence, stream, event}, state) do
@@ -169,7 +178,24 @@ defmodule Embassy.Rails.Connection do
     match?({:ok, %{"type" => "welcome"}}, Jason.decode(transmission))
   end
 
-  defp schedule_ping, do: Process.send_after(self(), :ping, @ping_interval)
+  defp schedule_ping(state) do
+    case Config.snapshot(state.instance).ping_interval do
+      :infinity -> :ok
+      interval -> Process.send_after(self(), :ping, interval)
+    end
+  end
+
+  defp push_broadcast(stream, payload, state) do
+    with identifier when not is_nil(identifier) <- state.streams[stream],
+         false <- payload[:exclude_socket] == state.socket_id do
+      frame =
+        Jason.encode!(%{identifier: identifier, message: decode_data(payload[:data])})
+
+      {:push, {:text, frame}, state}
+    else
+      _ -> {:ok, state}
+    end
+  end
 
   defp handle_command(command, %{"identifier" => identifier} = msg, state) do
     payload = %{

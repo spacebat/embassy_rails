@@ -34,6 +34,11 @@ defmodule Embassy.Rails do
 
   ## Optional options
 
+    * `:ping_interval` — ms between server pings (default `3_000`), or
+      `:infinity` to disable them and rely on the proxy or client.
+    * `:max_mailbox` — a connection whose mailbox holds more messages than
+      this when a broadcast arrives is disconnected as a slow client
+      (default `1_000`).
     * `:headers` — list of extra request header names forwarded to the RPC
       `Env` (case-insensitive), added to the defaults
       `cookie`, `user-agent`, `origin`, `x-forwarded-for`, `x-real-ip`.
@@ -121,6 +126,10 @@ defmodule Embassy.Rails do
   @doc false
   def registry_name(name), do: Module.concat(name, Registry)
 
+  @doc "Name of the duplicate-key Registry every live Connection registers in (key `:conn`)."
+  @spec connections_name(atom()) :: atom()
+  def connections_name(name), do: Module.concat(name, Connections)
+
   @impl true
   def init(opts) do
     name = Keyword.fetch!(opts, :name)
@@ -128,6 +137,8 @@ defmodule Embassy.Rails do
     pubsub = Keyword.fetch!(opts, :pubsub)
     rpc = Keyword.fetch!(opts, :rpc)
     broadcast = Keyword.fetch!(opts, :broadcast)
+
+    Embassy.Rails.Drain.reset(name)
 
     # Raises Embassy.NotStartedError if the parent isn't up first.
     parent = Embassy.Config.snapshot(embassy)
@@ -140,11 +151,16 @@ defmodule Embassy.Rails do
       rpc: rpc,
       broadcast: broadcast,
       presence: normalize_presence!(Keyword.get(opts, :presence, [])),
-      headers: forwarded_headers(Keyword.get(opts, :headers, []))
+      headers: forwarded_headers(Keyword.get(opts, :headers, [])),
+      ping_interval: Keyword.get(opts, :ping_interval, 3_000),
+      max_mailbox: Keyword.get(opts, :max_mailbox, 1_000)
     }
 
     children =
-      [{Registry, keys: :unique, name: registry_name(name), meta: [config: snapshot]}] ++
+      [
+        {Registry, keys: :unique, name: registry_name(name), meta: [config: snapshot]},
+        {Registry, keys: :duplicate, name: connections_name(name)}
+      ] ++
         rpc_children(name, rpc) ++
         presence_children(name, pubsub, snapshot.presence) ++
         broadcast_children(name, broadcast)

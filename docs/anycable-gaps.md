@@ -18,16 +18,6 @@ Consequence: Rails channel code cannot read the originating socket ID from
 it matters if the Rails app uses `ActionCable.server.broadcast` with `:except`
 targeting the originating socket.
 
-### Ping interval not configurable
-
-`Embassy.Rails.Connection` hard-codes `@ping_interval 3_000`. Some deployments
-(behind ALBs with 60 s idle timeouts, or clients with aggressive battery
-savings) need a different interval. Others may want to disable pings entirely
-and rely on the proxy or client.
-
-Fix: accept an optional `:ping_interval` key in the `Embassy.Rails` child spec
-(`:infinity` to disable), defaulting to `3_000`.
-
 ### Installer does not offer the gRPC transport
 
 `mix embassy_rails.install` (the Igniter task) only wires up `{:uds, …}` and
