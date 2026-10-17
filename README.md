@@ -179,8 +179,10 @@ definitions for a reporter.
 
 - `{Embassy.Rails.Drain, instance: MyApp.Embassy.Rails, window_ms: 30_000}`,
   placed after the Endpoint in the supervision tree, closes connections in
-  batches with a reconnecting `server_restart` disconnect on shutdown. Keep
-  the window inside `terminationGracePeriodSeconds`.
+  batches with a reconnecting `server_restart` disconnect on shutdown, then
+  waits up to one batch interval for them to close. New upgrades get a 503
+  while it drains. Keep the window plus one interval inside
+  `terminationGracePeriodSeconds`.
 - `Embassy.Rails.Health.ready?/1` for the readiness probe (not liveness).
 - `ping_interval:`, `max_mailbox:` and `slow_client_ms:` instance options
   tune pings and the slow-client cutoff: a connection is closed with

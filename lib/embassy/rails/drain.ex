@@ -5,14 +5,17 @@ defmodule Embassy.Rails.Drain do
   registered connection to close with a reconnecting `disconnect`
   (`{"type":"disconnect","reason":"server_restart","reconnect":true}`),
   spread over `:window_ms` (default 60_000) in `:batches` (default 20), so
-  clients do not all reconnect at once.
+  clients do not all reconnect at once. It then waits up to one more
+  batch interval for the connections to close. While draining,
+  `Embassy.Rails.Upgrade` answers new upgrades with 503.
 
   Start it in your application tree **after** the Endpoint, so that it
   terminates first:
 
       {Embassy.Rails.Drain, instance: MyApp.Embassy.Rails, window_ms: 30_000}
 
-  Its child spec gives it a shutdown longer than the window.
+  Its child spec gives it a shutdown longer than the window and the final
+  wait.
   """
 
   use GenServer
@@ -23,11 +26,12 @@ defmodule Embassy.Rails.Drain do
   @doc false
   def child_spec(opts) do
     window = Keyword.get(opts, :window_ms, @default_window_ms)
+    pause = div(window, Keyword.get(opts, :batches, @default_batches))
 
     %{
       id: {__MODULE__, Keyword.fetch!(opts, :instance)},
       start: {__MODULE__, :start_link, [opts]},
-      shutdown: window + 5_000
+      shutdown: window + pause + 5_000
     }
   end
 
@@ -65,12 +69,7 @@ defmodule Embassy.Rails.Drain do
   def terminate(_reason, state) do
     :persistent_term.put({__MODULE__, state.instance}, true)
 
-    pids =
-      state.instance
-      |> Embassy.Rails.connections_name()
-      |> Registry.lookup(:conn)
-      |> Enum.map(fn {pid, _} -> pid end)
-
+    pids = connections(state.instance)
     batch_size = max(1, ceil(length(pids) / state.batches))
     pause = div(state.window_ms, state.batches)
 
@@ -82,6 +81,36 @@ defmodule Embassy.Rails.Drain do
       Enum.each(batch, &send(&1, :embassy_rails_drain))
     end)
 
-    :ok
+    # Give the last batch one more pause to close, and drain any connection
+    # that registered after the lookup (an upgrade already past its check).
+    deadline = System.monotonic_time(:millisecond) + pause
+    await_closed(state.instance, MapSet.new(pids), deadline)
+  end
+
+  @poll_ms 10
+
+  defp await_closed(instance, sent, deadline) do
+    case connections(instance) do
+      [] ->
+        :ok
+
+      pids ->
+        late = Enum.reject(pids, &MapSet.member?(sent, &1))
+        Enum.each(late, &send(&1, :embassy_rails_drain))
+
+        if System.monotonic_time(:millisecond) < deadline do
+          Process.sleep(@poll_ms)
+          await_closed(instance, MapSet.union(sent, MapSet.new(late)), deadline)
+        else
+          :ok
+        end
+    end
+  end
+
+  defp connections(instance) do
+    instance
+    |> Embassy.Rails.connections_name()
+    |> Registry.lookup(:conn)
+    |> Enum.map(fn {pid, _} -> pid end)
   end
 end

@@ -18,7 +18,8 @@ defmodule Embassy.Rails.Upgrade do
         embassy_rails: MyApp.Embassy.Rails,
         subprotocols: ["actioncable-v1-json", "graphql-ws"]
 
-  Mount this plug on WS-only routes. Non-WS requests get a 426.
+  Mount this plug on WS-only routes. Non-WS requests get a 426, and
+  upgrades while `Embassy.Rails.Drain` is draining the instance get a 503.
   """
 
   @behaviour Plug
@@ -41,15 +42,26 @@ defmodule Embassy.Rails.Upgrade do
 
   @impl Plug
   def call(conn, %{embassy_rails: instance, subprotocols: subprotocols}) do
-    if websocket_upgrade?(conn) do
-      requested = requested_subprotocols(conn)
+    cond do
+      not websocket_upgrade?(conn) ->
+        reject(conn, instance, :not_an_upgrade, [])
 
-      case Enum.find(subprotocols, &(&1 in requested)) do
-        nil -> reject(conn, instance, :no_subprotocol, requested)
-        chosen -> do_upgrade(conn, instance, chosen)
-      end
-    else
-      reject(conn, instance, :not_an_upgrade, [])
+      # Send the client to another node rather than accept a connection
+      # the drain has already passed.
+      Embassy.Rails.Drain.draining?(instance) ->
+        reject(conn, instance, :draining, [])
+
+      true ->
+        negotiate(conn, instance, subprotocols)
+    end
+  end
+
+  defp negotiate(conn, instance, subprotocols) do
+    requested = requested_subprotocols(conn)
+
+    case Enum.find(subprotocols, &(&1 in requested)) do
+      nil -> reject(conn, instance, :no_subprotocol, requested)
+      chosen -> do_upgrade(conn, instance, chosen)
     end
   end
 
@@ -99,9 +111,14 @@ defmodule Embassy.Rails.Upgrade do
       %{instance: instance, kind: kind, requested_subprotocols: requested}
     )
 
+    {status, body} =
+      if kind == :draining,
+        do: {503, "Service Unavailable: draining"},
+        else: {426, "Upgrade Required: WebSocket upgrade not accepted"}
+
     conn
     |> put_resp_content_type("text/plain")
-    |> send_resp(426, "Upgrade Required: WebSocket upgrade not accepted")
+    |> send_resp(status, body)
     |> halt()
   end
 
