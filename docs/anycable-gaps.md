@@ -3,22 +3,6 @@
 Known gaps between the embassy_rails implementation and the full AnyCable
 feature surface. Ordered by real-world impact.
 
-## High impact
-
-### Multi-node broadcast uses local_broadcast for the HTTP source
-
-`Embassy.Rails.Broadcast.dispatch/4` takes a scope. The `:redisx` source
-dispatches with `:cluster` (`Phoenix.PubSub.broadcast/3`), because each
-stream entry is read by one node. The `:redis` source keeps `:local`, which
-is correct: every node subscribes to the Pub/Sub channel. The `:http` source
-also uses `:local`, so a broadcast posted to node A over HTTP will not reach
-connections on node B unless Rails posts to every node.
-
-Fix: dispatch the `:http` source with `:cluster` scope when Rails posts to a
-single load-balanced endpoint (one node receives each broadcast). Keep
-`:local` when Rails posts to every node. This likely wants a per-instance
-option, since embassy_rails cannot tell which topology it is in.
-
 ## Low impact
 
 ### socket_id not forwarded to the RPC Env

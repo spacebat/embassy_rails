@@ -60,6 +60,19 @@ defmodule Embassy.Rails.BroadcastPlugTest do
     assert_receive {:cable_broadcast, "b", %{data: "2"}}, 100
   end
 
+  test "dispatches with :cluster scope (Rails posts to one node)", %{opts: opts} do
+    {:ok, collector} = TelemetryCollector.attach([[:embassy_rails, :broadcast, :received]])
+    body = %{"stream" => "scoped", "data" => "1"}
+
+    post_json(body, [{"authorization", "Bearer the-key"}]) |> BroadcastPlug.call(opts)
+
+    assert [%{scope: :cluster}] =
+             for(
+               {_event, _meas, %{stream: "scoped"} = meta} <- TelemetryCollector.events(collector),
+               do: meta
+             )
+  end
+
   test "401 on missing authorization header", %{opts: opts} do
     body = %{"stream" => "chat", "data" => "hi"}
     conn = post_json(body, []) |> BroadcastPlug.call(opts)

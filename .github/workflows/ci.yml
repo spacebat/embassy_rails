@@ -78,6 +78,9 @@ jobs:
 
       - run: mix deps.get
 
+      # Enables the :distributed-tagged tests (see test/test_helper.exs).
+      - run: epmd -daemon
+
       - if: matrix.full
         run: mix ci
 

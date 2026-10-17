@@ -23,7 +23,7 @@ defmodule Embassy.Rails.BroadcastPlug do
   import Plug.Conn
   require Logger
 
-  alias Embassy.Rails.{BroadcastEnvelope, Config}
+  alias Embassy.Rails.{Broadcast, BroadcastEnvelope, Config}
 
   @impl Plug
   def init(opts) do
@@ -53,7 +53,7 @@ defmodule Embassy.Rails.BroadcastPlug do
 
     case BroadcastEnvelope.decode(body) do
       {:ok, items} ->
-        BroadcastEnvelope.dispatch_items(instance, items, :local)
+        BroadcastEnvelope.dispatch_items(instance, items, Broadcast.scope(:http))
         send_resp(conn, 204, "")
 
       {:error, :not_an_envelope} ->

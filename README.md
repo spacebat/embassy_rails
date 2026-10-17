@@ -40,6 +40,9 @@ Broadcasts from Rails reach connected clients via one of three sources,
 selected per instance with `broadcast: [source: ...]`:
 
 - `:http` — AnyCable's HTTP broadcaster posts to `Embassy.Rails.BroadcastPlug`.
+  Rails posts each broadcast to one (load-balanced) node, which
+  re-broadcasts it cluster-wide, so a multi-node deployment needs a
+  clustered `Phoenix.PubSub`.
 - `:redisx` — `Embassy.Rails.RedisStreamListener` consumes AnyCable's Redis
   Streams broadcaster, with the same defaults as anycable-go (stream
   `"__anycable__"`, consumer group `"bx"`). In Rails, set

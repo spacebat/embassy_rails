@@ -62,7 +62,7 @@ defmodule Embassy.Rails.RedisStreamListener do
   use GenServer
   require Logger
 
-  alias Embassy.Rails.BroadcastEnvelope
+  alias Embassy.Rails.{Broadcast, BroadcastEnvelope}
 
   @default_stream "__anycable__"
   @default_group "bx"
@@ -244,7 +244,7 @@ defmodule Embassy.Rails.RedisStreamListener do
   defp handle_entry({id, %{"payload" => payload}}, state) do
     case BroadcastEnvelope.decode(payload) do
       {:ok, items} ->
-        BroadcastEnvelope.dispatch_items(state.instance, items, :cluster)
+        BroadcastEnvelope.dispatch_items(state.instance, items, Broadcast.scope(:redisx))
 
       {:error, _} ->
         Logger.warning("Embassy.Rails.RedisStreamListener: malformed broadcast envelope #{id}")
