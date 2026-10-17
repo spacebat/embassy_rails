@@ -4,6 +4,7 @@ defmodule Embassy.Rails.GrpcIntegrationTest do
   use ExUnit.Case, async: false
 
   alias Embassy.Rails.GrpcChannel
+  alias Embassy.Rails.Health
   alias Embassy.Rails.RPC
   alias Embassy.Rails.Test.GrpcServer
   alias Embassy.Rails.Test.Helpers
@@ -54,5 +55,15 @@ defmodule Embassy.Rails.GrpcIntegrationTest do
     assert {:ok, resp} = RPC.command(instance, payload)
     assert resp["status"] == 1
     assert resp["streams"] == ["chat:1"]
+  end
+
+  @tag :capture_log
+  test "readiness is false once the gRPC server is gone, with a channel still cached",
+       %{instance: instance} do
+    assert Health.ready?(instance)
+
+    :ok = GRPC.Server.stop(GrpcServer.Impl)
+
+    refute Health.ready?(instance)
   end
 end

@@ -5,7 +5,9 @@ defmodule Embassy.Rails.Health do
   out of liveness: an RPC outage must not restart the pods.
 
   For the HTTP and UDS transports, any HTTP response to a `HEAD /` counts
-  as reachable; for gRPC, an established channel does.
+  as reachable. For gRPC, the channel must be established and a TCP
+  connection to the endpoint must open: a cached channel alone stays up
+  through an outage until a call fails on it.
   """
 
   alias Embassy.Rails.{Config, Drain, GrpcChannel}
@@ -21,14 +23,41 @@ defmodule Embassy.Rails.Health do
     snap = Config.snapshot(instance)
 
     case snap.rpc[:transport] do
-      {:grpc, _} ->
-        match?({:ok, _}, GrpcChannel.fetch_channel(instance))
+      {:grpc, endpoint} ->
+        match?({:ok, _}, GrpcChannel.fetch_channel(instance)) and tcp_ok?(endpoint)
 
       {:http, base} ->
         http_ok?(Finch.build(:head, base), snap.finch)
 
       {:uds, path} ->
         http_ok?(Finch.build(:head, "http://localhost/", [], nil, unix_socket: path), snap.finch)
+    end
+  end
+
+  defp tcp_ok?("unix:" <> path), do: connect_ok?({:local, path}, 0)
+
+  defp tcp_ok?(endpoint) do
+    case endpoint |> String.replace(~r{^\w+://}, "") |> String.split(":") |> Enum.split(-1) do
+      {[_ | _] = host, [port]} ->
+        case Integer.parse(port) do
+          {port, ""} -> connect_ok?(host |> Enum.join(":") |> String.to_charlist(), port)
+          _ -> true
+        end
+
+      # An endpoint this probe cannot parse is left to the channel check.
+      _ ->
+        true
+    end
+  end
+
+  defp connect_ok?(address, port) do
+    case :gen_tcp.connect(address, port, [:binary, active: false], @probe_timeout) do
+      {:ok, socket} ->
+        :gen_tcp.close(socket)
+        true
+
+      {:error, _} ->
+        false
     end
   end
 
