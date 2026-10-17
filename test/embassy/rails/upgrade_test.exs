@@ -141,6 +141,15 @@ defmodule Embassy.Rails.UpgradeTest do
       assert Upgrade.build_url(conn) == "wss://ws.example/sync?token=abc"
     end
 
+    test "takes the client's scheme from a comma list in x-forwarded-proto" do
+      conn =
+        conn(:get, "/sync")
+        |> Map.update!(:req_headers, &[{"host", "ws.example"} | &1])
+        |> Plug.Conn.put_req_header("x-forwarded-proto", "https, http")
+
+      assert Upgrade.build_url(conn) == "wss://ws.example/sync"
+    end
+
     test "uses wss when x-forwarded-ssl is on" do
       conn =
         conn(:get, "/sync")

@@ -126,9 +126,14 @@ defmodule Embassy.Rails.Upgrade do
 
   defp secure?(conn) do
     case get_req_header(conn, "x-forwarded-proto") do
-      [proto | _] -> String.downcase(proto) in ["https", "wss"]
+      # Each proxy hop appends, so the first value is the client's.
+      [proto | _] -> client_proto(proto) in ["https", "wss"]
       [] -> conn.scheme == :https or get_req_header(conn, "x-forwarded-ssl") == ["on"]
     end
+  end
+
+  defp client_proto(proto) do
+    proto |> String.split(",", parts: 2) |> hd() |> String.trim() |> String.downcase()
   end
 
   @doc false

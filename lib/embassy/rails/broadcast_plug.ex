@@ -35,9 +35,10 @@ defmodule Embassy.Rails.BroadcastPlug do
     snap = Config.snapshot(instance)
     expected = "Bearer " <> snap.broadcast[:key]
 
-    case authorization(conn) do
-      ^expected -> handle_authorized(conn, instance)
-      _ -> reject(conn, instance)
+    if Plug.Crypto.secure_compare(authorization(conn), expected) do
+      handle_authorized(conn, instance)
+    else
+      reject(conn, instance)
     end
   end
 
