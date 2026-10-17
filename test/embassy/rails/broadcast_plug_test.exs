@@ -45,18 +45,15 @@ defmodule Embassy.Rails.BroadcastPlugTest do
     assert_receive {:cable_broadcast, "chat_5", %{data: ~s({"text":"hi"})}}, 100
   end
 
-  test "204 on a valid multi-entry envelope (AnyCable HTTP adapter shape)", %{opts: opts} do
+  test "204 on a batched body (AnyCable batch shape: bare JSON array)", %{opts: opts} do
     Phoenix.PubSub.subscribe(Embassy.Rails.BroadcastPlugTest.PubSub, Broadcast.topic("a"))
     Phoenix.PubSub.subscribe(Embassy.Rails.BroadcastPlugTest.PubSub, Broadcast.topic("b"))
 
-    body = %{
-      "_json" => [
-        %{"stream" => "a", "data" => "1"},
-        %{"stream" => "b", "data" => "2"}
-      ]
-    }
-
-    conn = post_json(body, [{"authorization", "Bearer the-key"}]) |> BroadcastPlug.call(opts)
+    conn =
+      conn(:post, "/_broadcast", ~s([{"stream":"a","data":"1"},{"stream":"b","data":"2"}]))
+      |> Plug.Conn.put_req_header("authorization", "Bearer the-key")
+      |> Plug.Conn.put_req_header("content-type", "application/json")
+      |> BroadcastPlug.call(opts)
 
     assert conn.status == 204
     assert_receive {:cable_broadcast, "a", %{data: "1"}}, 100

@@ -4,34 +4,6 @@ defmodule Embassy.Rails.RedisListenerTest do
   alias Embassy.Rails.Broadcast
   alias Embassy.Rails.RedisListener
 
-  describe "decode_anycable/1" do
-    test "decodes a well-formed envelope" do
-      payload = ~s({"stream":"chat:1","data":"{\\"x\\":1}"})
-
-      assert RedisListener.decode_anycable(payload) ==
-               {:ok, "chat:1", %{data: ~s({"x":1}), exclude_socket: nil}}
-    end
-
-    test "extracts meta.exclude_socket when present" do
-      payload = ~s({"stream":"chat:1","data":"hi","meta":{"exclude_socket":"sock-9"}})
-
-      assert RedisListener.decode_anycable(payload) ==
-               {:ok, "chat:1", %{data: "hi", exclude_socket: "sock-9"}}
-    end
-
-    test "returns :error on malformed JSON" do
-      assert RedisListener.decode_anycable("not json") == :error
-    end
-
-    test "returns :error when stream is missing" do
-      assert RedisListener.decode_anycable(~s({"data":"hi"})) == :error
-    end
-
-    test "returns :error when stream is not a string" do
-      assert RedisListener.decode_anycable(~s({"stream":42,"data":"hi"})) == :error
-    end
-  end
-
   describe "handle_info :message" do
     setup do
       start_supervised!({Finch, name: __MODULE__.Finch})
@@ -67,6 +39,30 @@ defmodule Embassy.Rails.RedisListenerTest do
 
       assert {:noreply, ^state} = RedisListener.handle_info(msg, state)
       assert_receive {:cable_broadcast, "chat:1", %{data: "hi"}}, 100
+    end
+
+    test "dispatches every element of a batched payload", %{instance: instance} do
+      Phoenix.PubSub.subscribe(__MODULE__.PubSub, Broadcast.topic("a"))
+      Phoenix.PubSub.subscribe(__MODULE__.PubSub, Broadcast.topic("b"))
+
+      state = %{
+        instance: instance,
+        channel: "__anycable__",
+        conn: nil,
+        ref: nil,
+        status: :connected
+      }
+
+      msg =
+        {:redix_pubsub, self(), make_ref(), :message,
+         %{
+           channel: "__anycable__",
+           payload: ~s([{"stream":"a","data":"1"},{"stream":"b","data":"2"}])
+         }}
+
+      assert {:noreply, ^state} = RedisListener.handle_info(msg, state)
+      assert_receive {:cable_broadcast, "a", %{data: "1"}}, 100
+      assert_receive {:cable_broadcast, "b", %{data: "2"}}, 100
     end
   end
 

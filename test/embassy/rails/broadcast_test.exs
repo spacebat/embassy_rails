@@ -36,6 +36,20 @@ defmodule Embassy.Rails.BroadcastTest do
     assert_receive {:cable_broadcast, "chat_5", %{data: "hello"}}, 100
   end
 
+  test "dispatch/4 with :cluster scope delivers and tags telemetry", %{instance: instance} do
+    alias Embassy.Rails.Test.TelemetryCollector
+
+    {:ok, collector} = TelemetryCollector.attach([[:embassy_rails, :broadcast, :received]])
+    Phoenix.PubSub.subscribe(Embassy.Rails.BroadcastTest.PubSub, Broadcast.topic("s"))
+
+    Broadcast.dispatch(instance, "s", %{data: 1}, :cluster)
+
+    assert_receive {:cable_broadcast, "s", %{data: 1}}, 100
+
+    assert [{[:embassy_rails, :broadcast, :received], _meas, %{scope: :cluster}}] =
+             TelemetryCollector.events(collector)
+  end
+
   test "dispatch/3 does not deliver to subscribers of a different stream", %{instance: instance} do
     Phoenix.PubSub.subscribe(Embassy.Rails.BroadcastTest.PubSub, Broadcast.topic("other"))
 

@@ -23,7 +23,7 @@ defmodule Embassy.Rails.BroadcastPlug do
   import Plug.Conn
   require Logger
 
-  alias Embassy.Rails.{Broadcast, Config}
+  alias Embassy.Rails.{BroadcastEnvelope, Config}
 
   @impl Plug
   def init(opts) do
@@ -51,13 +51,16 @@ defmodule Embassy.Rails.BroadcastPlug do
   defp handle_authorized(conn, instance) do
     {:ok, body, conn} = read_body(conn)
 
-    case Jason.decode(body) do
-      {:ok, decoded} ->
-        decoded |> entries() |> Enum.each(&dispatch_entry(instance, &1))
+    case BroadcastEnvelope.decode(body) do
+      {:ok, items} ->
+        BroadcastEnvelope.dispatch_items(instance, items, :local)
         send_resp(conn, 204, "")
 
-      {:error, reason} ->
-        Logger.warning("Embassy.Rails.BroadcastPlug: bad JSON body: #{inspect(reason)}")
+      {:error, :not_an_envelope} ->
+        send_resp(conn, 204, "")
+
+      {:error, :invalid_json = reason} ->
+        Logger.warning("Embassy.Rails.BroadcastPlug: bad JSON body")
 
         :telemetry.execute(
           [:embassy_rails, :broadcast, :exception],
@@ -68,19 +71,6 @@ defmodule Embassy.Rails.BroadcastPlug do
         send_resp(conn, 400, "Bad Request: malformed JSON")
     end
   end
-
-  defp entries(%{"_json" => list}) when is_list(list), do: list
-  defp entries(%{"stream" => _} = single), do: [single]
-  defp entries(_), do: []
-
-  defp dispatch_entry(instance, %{"stream" => stream} = entry) do
-    Broadcast.dispatch(instance, stream, %{
-      data: entry["data"],
-      exclude_socket: get_in(entry, ["meta", "exclude_socket"])
-    })
-  end
-
-  defp dispatch_entry(_, _), do: :ok
 
   defp reject(conn, instance) do
     Logger.warning("Embassy.Rails.BroadcastPlug: rejected request (bad bearer)")
