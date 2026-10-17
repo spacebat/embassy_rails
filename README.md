@@ -23,6 +23,8 @@ Phoenix-as-front-door deployment for Rails.
 - **`Embassy.Rails.RedisListener`** — AnyCable Redis Pub/Sub broadcaster source.
 - **`Embassy.Rails.RedisStreamListener`** — AnyCable Redis Streams
   (`redisx`) broadcaster source.
+- **`Embassy.Rails.Presence`** and **`Embassy.Rails.PresenceApiPlug`** —
+  AnyCable presence and its REST API.
 - **`Embassy.Rails`** supervisor + **`Embassy.Rails.Config`** — per-
   instance plumbing.
 - `:telemetry` for RPC, broadcast, upgrade, and WS lifecycle.
@@ -57,6 +59,28 @@ selected per instance with `broadcast: [source: ...]`:
 All three accept AnyCable's batched broadcasts (a JSON array of
 envelopes). Remote commands such as `remote_connections.disconnect` are
 received but ignored.
+
+## Presence
+
+AnyCable presence works as in anycable-go, cluster-wide on `Phoenix.Tracker`
+(multi-node needs a clustered `Phoenix.PubSub`). It is on by default:
+
+    presence: [ttl_ms: 60_000, api_secret: nil, upstream: nil]   # or presence: false
+
+- In Rails, `include AnyCable::Rails::Channel::Presence` and call
+  `join_presence` / `leave_presence` from a channel.
+- JS clients use `protocol: "actioncable-v1-ext-json"` for
+  `channel.presence.join/leave/info` and presence events.
+- A disconnected client stays present for `ttl_ms`, so a quick reconnect is
+  never seen as a leave.
+- `Embassy.Rails.PresenceApiPlug` serves anycable-go's REST API:
+
+      forward "/api/presence", Embassy.Rails.PresenceApiPlug,
+        embassy_rails: MyApp.Embassy.Rails
+
+  `GET /api/presence/:stream/users`, bearer `api_secret`. With `upstream:`
+  set to an anycable-go base URL, its records are unioned in, and an upstream
+  failure answers 503 rather than a partial list.
 
 ## Installer
 

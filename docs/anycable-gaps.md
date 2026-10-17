@@ -69,15 +69,18 @@ configure manually.
 
 Fix: add a `--transport grpc` flag to the installer task.
 
-## Out of scope (AnyCable Pro)
+## Not implemented
 
-The following features are part of AnyCable Pro and require a separate proto
-service (`History`, `Presence`). They are not in the vendored
-`priv/protos/anycable_rpc.proto` and are not planned for embassy_rails.
+Presence is implemented (`Embassy.Rails.Presence`, open source in anycable-go
+since 1.5). These neighbouring AnyCable features are not:
 
-- **Channel history / stream history** — `GetHistory` RPC; replay missed
-  messages on reconnect.
-- **Presence** — `Presence` service; track online members per channel.
+- **Reliable streams / history** — the broker's stream history; ext-json
+  clients' `history` requests are ignored, and the welcome message carries no
+  `sid`, so there is no session recovery after a reconnect.
+- **Signed and public streams** (`$pubsub`), including presence on them
+  (`turbo-cable-presence-source`).
+- **Whisper** (`$w`).
+- **Presence webhooks** — not implemented in anycable-go either.
 
 ## Marginal
 

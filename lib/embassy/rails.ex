@@ -32,6 +32,15 @@ defmodule Embassy.Rails do
       `Embassy.Rails.RedisStreamListener`. Both Redis sources require the
       optional `:redix` dependency.
 
+  ## Optional options
+
+    * `:presence` — keyword, or `false` to disable AnyCable presence.
+      `:ttl_ms` (default `60_000`) is how long a disconnected client stays
+      present; `:api_secret` (default `nil`, no auth) guards
+      `Embassy.Rails.PresenceApiPlug`; `:upstream` (default `nil`) is an
+      anycable-go base URL whose presence records the API unions in. See
+      `Embassy.Rails.Presence`.
+
   ## Example
 
       children = [
