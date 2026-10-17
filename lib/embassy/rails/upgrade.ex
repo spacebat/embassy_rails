@@ -30,7 +30,6 @@ defmodule Embassy.Rails.Upgrade do
   # ext-json carries AnyCable's presence commands; plain json clients are
   # unaffected.
   @default_subprotocols ["actioncable-v1-ext-json", "actioncable-v1-json"]
-  @forwarded_headers ~w(cookie user-agent origin x-forwarded-for x-real-ip)
 
   @impl Plug
   def init(opts) do
@@ -68,11 +67,13 @@ defmodule Embassy.Rails.Upgrade do
   end
 
   defp do_upgrade(conn, instance, chosen) do
+    snap = Embassy.Rails.Config.snapshot(instance)
+
     state = %{
       instance: instance,
       socket_id: random_id(),
       url: build_url(conn),
-      headers: extract_headers(conn),
+      headers: extract_headers(conn, snap.headers),
       identifiers: nil,
       cstate: %{},
       istate: %{},
@@ -106,8 +107,11 @@ defmodule Embassy.Rails.Upgrade do
   defp random_id,
     do: "phx-" <> (16 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false))
 
-  defp build_url(conn) do
-    scheme = if conn.scheme == :https, do: "wss", else: "ws"
+  @doc false
+  # The client-facing URL. Behind a TLS-terminating proxy conn.scheme is
+  # :http, so the proxy's x-forwarded-proto / x-forwarded-ssl decide.
+  def build_url(conn) do
+    scheme = if secure?(conn), do: "wss", else: "ws"
     host = conn_host(conn)
     qs = if conn.query_string == "", do: "", else: "?" <> conn.query_string
     "#{scheme}://#{host}#{conn.request_path}#{qs}"
@@ -120,7 +124,17 @@ defmodule Embassy.Rails.Upgrade do
     end
   end
 
-  defp extract_headers(conn) do
-    for {k, v} <- conn.req_headers, k in @forwarded_headers, into: %{}, do: {k, v}
+  defp secure?(conn) do
+    case get_req_header(conn, "x-forwarded-proto") do
+      [proto | _] -> String.downcase(proto) in ["https", "wss"]
+      [] -> conn.scheme == :https or get_req_header(conn, "x-forwarded-ssl") == ["on"]
+    end
+  end
+
+  @doc false
+  # Request headers forwarded to the RPC Env, matched case-insensitively.
+  def extract_headers(conn, allowed) do
+    allowed = MapSet.new(allowed, &String.downcase/1)
+    for {k, v} <- conn.req_headers, MapSet.member?(allowed, k), into: %{}, do: {k, v}
   end
 end

@@ -19,23 +19,6 @@ single load-balanced endpoint (one node receives each broadcast). Keep
 `:local` when Rails posts to every node. This likely wants a per-instance
 option, since embassy_rails cannot tell which topology it is in.
 
-## Medium impact
-
-### wss:// scheme incorrect behind TLS-terminating proxies
-
-`Embassy.Rails.Upgrade.build_url/1` checks `conn.scheme == :https` to emit
-`wss://` vs `ws://`. Behind nginx, an ALB, or any TLS-terminating reverse
-proxy, `conn.scheme` is `:http` even though the client connected over TLS.
-
-Fix: consult `x-forwarded-proto` / `x-forwarded-ssl` headers before falling
-back to `conn.scheme`. The `Plug.Conn.get_req_header/2` approach is
-straightforward; the consumer can also set `plug :put_secure_browser_headers`
-or configure the endpoint with `force_ssl`.
-
-Consequence: Rails channel code that inspects `env.url` or
-`request.env["HTTP_URL"]` sees `ws://` for TLS connections routed through a
-proxy, which can break auth or CSP checks in the Rails app.
-
 ## Low impact
 
 ### socket_id not forwarded to the RPC Env

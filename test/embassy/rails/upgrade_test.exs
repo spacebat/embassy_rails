@@ -111,4 +111,65 @@ defmodule Embassy.Rails.UpgradeTest do
 
     assert ["graphql-ws"] = Plug.Conn.get_resp_header(conn, "sec-websocket-protocol")
   end
+
+  describe "extract_headers/2" do
+    test "forwards configured headers case-insensitively" do
+      conn =
+        conn(:get, "/sync")
+        |> Plug.Conn.put_req_header("x-auth-token", "tok")
+        |> Plug.Conn.put_req_header("x-version", "1.77")
+        |> Plug.Conn.put_req_header("authorization", "Bearer b")
+        |> Plug.Conn.put_req_header("x-other", "drop me")
+
+      headers = Upgrade.extract_headers(conn, ["X-AUTH-TOKEN", "x-version", "Authorization"])
+
+      assert headers == %{
+               "x-auth-token" => "tok",
+               "x-version" => "1.77",
+               "authorization" => "Bearer b"
+             }
+    end
+  end
+
+  describe "build_url/1" do
+    test "uses wss when x-forwarded-proto is https" do
+      conn =
+        conn(:get, "/sync?token=abc")
+        |> Map.update!(:req_headers, &[{"host", "ws.example"} | &1])
+        |> Plug.Conn.put_req_header("x-forwarded-proto", "https")
+
+      assert Upgrade.build_url(conn) == "wss://ws.example/sync?token=abc"
+    end
+
+    test "uses wss when x-forwarded-ssl is on" do
+      conn =
+        conn(:get, "/sync")
+        |> Map.update!(:req_headers, &[{"host", "ws.example"} | &1])
+        |> Plug.Conn.put_req_header("x-forwarded-ssl", "on")
+
+      assert Upgrade.build_url(conn) == "wss://ws.example/sync"
+    end
+
+    test "falls back to ws for plain http" do
+      conn = conn(:get, "/sync") |> Map.update!(:req_headers, &[{"host", "ws.example"} | &1])
+      assert Upgrade.build_url(conn) == "ws://ws.example/sync"
+    end
+  end
+
+  test "instance :headers option is merged with defaults in the snapshot" do
+    start_supervised!(
+      {Embassy.Rails,
+       name: __MODULE__.HeadersInstance,
+       embassy: Embassy.Rails.UpgradeTest.Embassy,
+       pubsub: Embassy.Rails.UpgradeTest.PubSub,
+       rpc: [transport: {:http, "http://example.test"}, secret: "shh"],
+       broadcast: [source: :http, key: "bcast"],
+       headers: ["X-Auth-Token"]},
+      id: :headers_instance
+    )
+
+    headers = Embassy.Rails.Config.snapshot(__MODULE__.HeadersInstance).headers
+    assert "x-auth-token" in headers
+    assert "cookie" in headers
+  end
 end

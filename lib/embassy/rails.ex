@@ -34,6 +34,9 @@ defmodule Embassy.Rails do
 
   ## Optional options
 
+    * `:headers` — list of extra request header names forwarded to the RPC
+      `Env` (case-insensitive), added to the defaults
+      `cookie`, `user-agent`, `origin`, `x-forwarded-for`, `x-real-ip`.
     * `:presence` — keyword, or `false` to disable AnyCable presence.
       `:ttl_ms` (default `60_000`) is how long a disconnected client stays
       present; `:api_secret` (default `nil`, no auth) guards
@@ -136,7 +139,8 @@ defmodule Embassy.Rails do
       pubsub: pubsub,
       rpc: rpc,
       broadcast: broadcast,
-      presence: normalize_presence!(Keyword.get(opts, :presence, []))
+      presence: normalize_presence!(Keyword.get(opts, :presence, [])),
+      headers: forwarded_headers(Keyword.get(opts, :headers, []))
     }
 
     children =
@@ -178,6 +182,11 @@ defmodule Embassy.Rails do
     end
   end
 
+  @default_headers ~w(cookie user-agent origin x-forwarded-for x-real-ip)
+
+  @doc false
+  def default_headers, do: @default_headers
+
   @presence_defaults [ttl_ms: 60_000, api_secret: nil, upstream: nil]
 
   @doc false
@@ -216,6 +225,13 @@ defmodule Embassy.Rails do
   def normalize_presence!(other) do
     raise ArgumentError,
           "Embassy.Rails: :presence must be a keyword list or false, got #{inspect(other)}"
+  end
+
+  defp forwarded_headers(extra) do
+    extra
+    |> Enum.map(&String.downcase/1)
+    |> Kernel.++(@default_headers)
+    |> Enum.uniq()
   end
 
   defp presence_children(_name, _pubsub, nil), do: []
