@@ -350,7 +350,10 @@ defmodule Embassy.Rails.Connection do
     {:push, presence_frame(identifier, message), state}
   end
 
-  defp presence_join(state, identifier, id, info) do
+  # The id may come from the client: only a non-empty string or an integer
+  # is a presence id.
+  defp presence_join(state, identifier, id, info)
+       when (is_binary(id) and id != "") or is_integer(id) do
     with stream when is_binary(stream) <- state.presence_streams[identifier],
          :ok <- Presence.join(state.instance, stream, state.socket_id, to_string(id), info) do
       state
@@ -363,6 +366,11 @@ defmodule Embassy.Rails.Connection do
         Logger.warning("Embassy.Rails.Connection: presence join failed: #{inspect(reason)}")
         state
     end
+  end
+
+  defp presence_join(state, _identifier, id, _info) do
+    Logger.warning("Embassy.Rails.Connection: ignoring presence join with id #{inspect(id)}")
+    state
   end
 
   defp presence_leave(state, identifier) do

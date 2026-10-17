@@ -619,6 +619,21 @@ defmodule Embassy.Rails.ConnectionTest do
       refute_receive {:cable_presence, _, _}, 50
     end
 
+    test "a client join with a non-scalar or null id is ignored", %{bypass: bypass, state: state} do
+      stub_commands(bypass, fn _ -> with_presence_stream("k") end)
+      state = subscribed(%{state | identifiers: "abc"})
+
+      for id <- [%{a: 1}, [1], nil] do
+        assert {:ok, _} =
+                 send_frame(state, %{command: "join", identifier: @room, presence: %{id: id}})
+      end
+
+      refute_receive {:cable_presence, _, _}, 50
+
+      assert {:ok, _} =
+               send_frame(state, %{command: "subscribe", identifier: @room, presence: %{id: [1]}})
+    end
+
     test "non-JSON info passes through as a string", %{bypass: bypass, state: state} do
       stub_commands(bypass, fn _ ->
         with_presence_stream("j", %{
