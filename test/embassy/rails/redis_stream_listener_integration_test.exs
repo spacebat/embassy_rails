@@ -129,6 +129,26 @@ defmodule Embassy.Rails.RedisStreamListenerIntegrationTest do
     refute_received {:redisx, :disconnected, _, _}
   end
 
+  test "dispatches a batch that contains a command entry", ctx do
+    listener = start_listener(ctx, consumer: "c1")
+    assert_receive {:redisx, :connected, _, _}, 1_000
+    Phoenix.PubSub.subscribe(__MODULE__.PubSub, Broadcast.topic("m"))
+
+    batch =
+      Jason.encode!([
+        %{stream: "m", data: "1"},
+        %{command: "disconnect", payload: %{identifier: "u1", reconnect: true}},
+        %{stream: "m", data: "2"}
+      ])
+
+    xadd_payload(ctx.redis, ctx.stream, batch)
+
+    assert_receive {:cable_broadcast, "m", %{data: "1"}}, 1_000
+    assert_receive {:cable_broadcast, "m", %{data: "2"}}, 1_000
+    eventually(fn -> Redix.command!(ctx.redis, ["XLEN", ctx.stream]) == 0 end)
+    assert Process.alive?(listener)
+  end
+
   test "acks and drops an entry without a payload field", ctx do
     start_listener(ctx, consumer: "c1")
     assert_receive {:redisx, :connected, _, _}, 1_000
