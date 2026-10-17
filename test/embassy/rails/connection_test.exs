@@ -20,7 +20,8 @@ defmodule Embassy.Rails.ConnectionTest do
        embassy: Embassy.Rails.ConnectionTest.Embassy,
        pubsub: Embassy.Rails.ConnectionTest.PubSub,
        rpc: [transport: {:http, "http://localhost:#{bypass.port}"}, secret: "shh"],
-       broadcast: [source: :http, key: "bcast"]}
+       broadcast: [source: :http, key: "bcast"],
+       presence: [ttl_ms: 50]}
     )
 
     initial_state = %{
@@ -31,7 +32,8 @@ defmodule Embassy.Rails.ConnectionTest do
       identifiers: nil,
       cstate: %{},
       istate: %{},
-      streams: %{}
+      streams: %{},
+      presence_streams: %{}
     }
 
     {:ok, bypass: bypass, state: initial_state}
@@ -126,6 +128,25 @@ defmodule Embassy.Rails.ConnectionTest do
 
     assert Map.has_key?(new_state.streams, "chat_5")
     assert new_state.cstate == %{"u" => "1"}
+  end
+
+  @tag :capture_log
+  test "unsubscribe from a channel without presence logs no presence warning", %{
+    bypass: bypass,
+    state: state
+  } do
+    Bypass.expect_once(bypass, "POST", "/_anycable/command", fn conn ->
+      Plug.Conn.resp(conn, 200, ~s({"status":1,"streams":[],"transmissions":[]}))
+    end)
+
+    frame = Jason.encode!(%{command: "unsubscribe", identifier: ~s({"channel":"Plain"})})
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        Connection.handle_in({frame, [opcode: :text]}, %{state | identifiers: "abc"})
+      end)
+
+    refute log =~ "presence"
   end
 
   test "handle_in unsubscribe: stops streams, no transmissions", %{bypass: bypass, state: state} do
@@ -292,5 +313,236 @@ defmodule Embassy.Rails.ConnectionTest do
     assert {:ok, new_state} = Connection.handle_in({frame, [opcode: :text]}, state)
     assert new_state.istate == %{"a" => "1", "$p" => "s1"}
     assert new_state.cstate == %{"c" => "1"}
+  end
+
+  describe "presence" do
+    @room ~s({"channel":"Room"})
+
+    # Answers every command RPC with `fun.(decoded_request)`.
+    defp stub_commands(bypass, fun) do
+      Bypass.stub(bypass, "POST", "/_anycable/command", fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        Plug.Conn.resp(conn, 200, Jason.encode!(fun.(Jason.decode!(body))))
+      end)
+    end
+
+    defp ok_response(extra) do
+      Map.merge(%{"status" => 1, "streams" => [], "transmissions" => []}, extra)
+    end
+
+    defp send_frame(state, frame),
+      do: Connection.handle_in({Jason.encode!(frame), [opcode: :text]}, state)
+
+    defp subscribed(state, identifier \\ @room) do
+      case send_frame(state, %{command: "subscribe", identifier: identifier}) do
+        {:ok, state} -> state
+        {:push, _frames, state} -> state
+      end
+    end
+
+    defp with_presence_stream(stream, extra \\ %{}) do
+      ok_response(
+        Map.merge(%{"streams" => [stream], "env" => %{"istate" => %{"$p" => stream}}}, extra)
+      )
+    end
+
+    test "rpc join on subscribe", %{bypass: bypass, state: state} do
+      stub_commands(bypass, fn _ ->
+        with_presence_stream("a", %{
+          "transmissions" => [~s({"type":"confirm_subscription","identifier":"x"})],
+          "presence" => %{"type" => "join", "id" => "2024", "info" => ~s({"name":"Bart"})}
+        })
+      end)
+
+      assert {:push, [{:text, _confirm}], state} =
+               send_frame(%{state | identifiers: "abc"}, %{
+                 command: "subscribe",
+                 identifier: @room
+               })
+
+      assert_receive {:cable_presence, "a", event}, 500
+      assert event == %{"type" => "join", "id" => "2024", "info" => %{"name" => "Bart"}}
+
+      assert {:push, {:text, frame}, _} =
+               Connection.handle_info({:cable_presence, "a", event}, state)
+
+      assert Jason.decode!(frame) == %{
+               "type" => "presence",
+               "identifier" => @room,
+               "message" => %{"type" => "join", "id" => "2024", "info" => %{"name" => "Bart"}}
+             }
+    end
+
+    test "rpc leave on perform", %{bypass: bypass, state: state} do
+      stub_commands(bypass, fn
+        %{"command" => "subscribe"} ->
+          with_presence_stream("b", %{"presence" => %{"type" => "join", "id" => "2024"}})
+
+        %{"command" => "message"} ->
+          ok_response(%{"presence" => %{"type" => "leave", "id" => "2024"}})
+      end)
+
+      state = subscribed(%{state | identifiers: "abc"})
+      assert_receive {:cable_presence, "b", %{"type" => "join"}}, 500
+
+      send_frame(state, %{command: "message", identifier: @room, data: ~s({"action":"unfollow"})})
+      assert_receive {:cable_presence, "b", %{"type" => "leave", "id" => "2024"}}, 500
+    end
+
+    test "subscribe with client presence joins on status 1", %{bypass: bypass, state: state} do
+      stub_commands(bypass, fn _ -> with_presence_stream("c") end)
+
+      send_frame(%{state | identifiers: "abc"}, %{
+        command: "subscribe",
+        identifier: @room,
+        presence: %{id: "7", info: %{a: 1}}
+      })
+
+      assert_receive {:cable_presence, "c",
+                      %{"type" => "join", "id" => "7", "info" => %{"a" => 1}}},
+                     500
+    end
+
+    test "subscribe with client presence does not join on status 2", %{
+      bypass: bypass,
+      state: state
+    } do
+      stub_commands(bypass, fn _ -> with_presence_stream("c2", %{"status" => 2}) end)
+
+      send_frame(%{state | identifiers: "abc"}, %{
+        command: "subscribe",
+        identifier: @room,
+        presence: %{id: "7"}
+      })
+
+      refute_receive {:cable_presence, "c2", _}, 100
+    end
+
+    test "client join and leave commands", %{bypass: bypass, state: state} do
+      test_pid = self()
+
+      stub_commands(bypass, fn req ->
+        send(test_pid, {:rpc, req["command"]})
+        with_presence_stream("d")
+      end)
+
+      state = subscribed(%{state | identifiers: "abc"})
+      assert_receive {:rpc, "subscribe"}
+
+      assert {:ok, state} =
+               send_frame(state, %{command: "join", identifier: @room, presence: %{id: "x"}})
+
+      assert_receive {:cable_presence, "d", %{"type" => "join", "id" => "x"}}, 500
+
+      assert {:ok, _} = send_frame(state, %{command: "leave", identifier: @room})
+      assert_receive {:cable_presence, "d", %{"type" => "leave", "id" => "x"}}, 500
+      refute_received {:rpc, _}
+    end
+
+    test "presence command replies with the info frame", %{bypass: bypass, state: state} do
+      stub_commands(bypass, fn _ ->
+        with_presence_stream("e", %{
+          "presence" => %{"type" => "join", "id" => "u1", "info" => ~s({"n":1})}
+        })
+      end)
+
+      state = subscribed(%{state | identifiers: "abc"})
+
+      assert {:push, {:text, frame}, _} =
+               send_frame(state, %{command: "presence", identifier: @room, data: %{}})
+
+      assert Jason.decode!(frame) == %{
+               "type" => "presence",
+               "identifier" => @room,
+               "message" => %{
+                 "type" => "info",
+                 "total" => 1,
+                 "records" => [%{"id" => "u1", "info" => %{"n" => 1}}]
+               }
+             }
+
+      assert {:push, {:text, frame}, _} =
+               send_frame(state, %{
+                 command: "presence",
+                 identifier: @room,
+                 data: %{return_records: false}
+               })
+
+      refute Map.has_key?(Jason.decode!(frame)["message"], "records")
+    end
+
+    test "unsubscribe leaves", %{bypass: bypass, state: state} do
+      stub_commands(bypass, fn
+        %{"command" => "subscribe"} ->
+          with_presence_stream("f", %{"presence" => %{"type" => "join", "id" => "u1"}})
+
+        %{"command" => "unsubscribe"} ->
+          ok_response(%{})
+      end)
+
+      state = subscribed(%{state | identifiers: "abc"})
+      assert_receive {:cable_presence, "f", %{"type" => "join"}}, 500
+
+      {_, state} = send_frame(state, %{command: "unsubscribe", identifier: @room})
+      assert_receive {:cable_presence, "f", %{"type" => "leave", "id" => "u1"}}, 500
+      refute Map.has_key?(state.presence_streams, @room)
+    end
+
+    test "second connection with the same id", %{bypass: bypass, state: state} do
+      stub_commands(bypass, fn
+        %{"command" => "subscribe"} ->
+          with_presence_stream("g", %{"presence" => %{"type" => "join", "id" => "2024"}})
+
+        %{"command" => "unsubscribe"} ->
+          ok_response(%{})
+      end)
+
+      first = subscribed(%{state | identifiers: "abc", socket_id: "s1"})
+      _second = subscribed(%{state | identifiers: "abc", socket_id: "s2"})
+
+      assert_receive {:cable_presence, "g", %{"type" => "join"}}, 500
+      refute_receive {:cable_presence, "g", %{"type" => "join"}}, 100
+
+      send_frame(first, %{command: "unsubscribe", identifier: @room})
+      refute_receive {:cable_presence, "g", %{"type" => "leave"}}, 100
+    end
+
+    test "presence commands without a presence stream", %{bypass: bypass, state: state} do
+      stub_commands(bypass, fn _ -> ok_response(%{"streams" => ["h"]}) end)
+      state = subscribed(%{state | identifiers: "abc"})
+
+      assert {:ok, ^state} =
+               send_frame(state, %{command: "join", identifier: @room, presence: %{id: "x"}})
+
+      refute_receive {:cable_presence, _, _}, 50
+
+      assert {:push, {:text, frame}, _} =
+               send_frame(state, %{command: "presence", identifier: @room})
+
+      assert Jason.decode!(frame) == %{
+               "type" => "presence",
+               "identifier" => @room,
+               "message" => %{"type" => "error"}
+             }
+    end
+
+    test "a client join without a presence object is ignored", %{bypass: bypass, state: state} do
+      stub_commands(bypass, fn _ -> with_presence_stream("i") end)
+      state = subscribed(%{state | identifiers: "abc"})
+
+      assert {:ok, _} = send_frame(state, %{command: "join", identifier: @room})
+      refute_receive {:cable_presence, _, _}, 50
+    end
+
+    test "non-JSON info passes through as a string", %{bypass: bypass, state: state} do
+      stub_commands(bypass, fn _ ->
+        with_presence_stream("j", %{
+          "presence" => %{"type" => "join", "id" => "u1", "info" => "plain"}
+        })
+      end)
+
+      subscribed(%{state | identifiers: "abc"})
+      assert_receive {:cable_presence, "j", %{"info" => "plain"}}, 500
+    end
   end
 end

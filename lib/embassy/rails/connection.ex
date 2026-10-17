@@ -8,6 +8,23 @@ defmodule Embassy.Rails.Connection do
   instance name, the AnyCable connection identifiers + state, and the
   active stream subscriptions.
 
+  ## Presence
+
+  AnyCable presence (see `Embassy.Rails.Presence`) is driven two ways:
+
+    * from Rails, when a command reply carries `presence` (a channel calling
+      `join_presence` / `leave_presence`). The presence stream is the `$p`
+      key of that reply's `istate`, remembered per channel identifier.
+    * from the client over `actioncable-v1-ext-json`: the `join`, `leave`
+      and `presence` commands, and a `presence` object on `subscribe`.
+      These are handled here and never sent to Rails.
+
+  Join and leave events reach subscribers as
+  `{"type":"presence","identifier":...,"message":{"type":"join"|"leave",...}}`.
+  Unlike anycable-go, a `presence` command on a channel with no presence
+  stream replies with `"message":{"type":"error"}` rather than nothing, so
+  the JS client's `info()` promise rejects instead of hanging.
+
   See the v0.1 spec at
   `docs/superpowers/specs/2026-05-19-embassy-rails-v0.1-design.md` for
   the design rationale and error-handling matrix.
@@ -15,7 +32,7 @@ defmodule Embassy.Rails.Connection do
 
   @behaviour WebSock
 
-  alias Embassy.Rails.{Broadcast, Config, RPC}
+  alias Embassy.Rails.{Broadcast, Config, Presence, RPC}
 
   require Logger
 
@@ -60,6 +77,10 @@ defmodule Embassy.Rails.Connection do
       when command in ["subscribe", "unsubscribe", "message"] ->
         handle_command(command, msg, state)
 
+      {:ok, %{"command" => command, "identifier" => identifier} = msg}
+      when command in ["join", "leave", "presence"] ->
+        handle_presence_command(command, identifier, msg, state)
+
       {:ok, other} ->
         Logger.debug("Embassy.Rails.Connection: ignoring unknown frame: #{inspect(other)}")
         {:ok, state}
@@ -86,6 +107,13 @@ defmodule Embassy.Rails.Connection do
       {:push, {:text, frame}, state}
     else
       _ -> {:ok, state}
+    end
+  end
+
+  def handle_info({:cable_presence, stream, event}, state) do
+    case state.streams[stream] do
+      nil -> {:ok, state}
+      identifier -> {:push, presence_frame(identifier, event), state}
     end
   end
 
@@ -154,7 +182,9 @@ defmodule Embassy.Rails.Connection do
 
     case RPC.command(state.instance, payload) do
       {:ok, %{"status" => status} = resp} when status in [1, 2] ->
-        apply_command_response(resp, identifier, state)
+        resp
+        |> apply_command_response(identifier, state)
+        |> after_command(command, status, msg)
 
       {:ok, resp} ->
         Logger.warning("Embassy.Rails.Connection: error command response=#{inspect(resp)}")
@@ -175,6 +205,8 @@ defmodule Embassy.Rails.Connection do
       |> add_streams(resp["streams"] || [], identifier)
       |> drop_streams(resp["stopped_streams"] || [])
       |> maybe_stop_all_streams(resp["stop_streams"], identifier)
+      |> put_presence_stream(identifier, get_in(resp, ["env", "istate", "$p"]))
+      |> apply_rpc_presence(identifier, resp["presence"])
 
     frames = Enum.map(resp["transmissions"] || [], &{:text, &1})
 
@@ -184,6 +216,131 @@ defmodule Embassy.Rails.Connection do
       _ -> {:push, frames, state}
     end
   end
+
+  # --- presence ---
+
+  # Presence on subscribe (ext-json clients rejoining) and leave on
+  # unsubscribe apply only once the RPC confirmed the command.
+  defp after_command(result, "subscribe", 1, %{"identifier" => identifier} = msg) do
+    case msg["presence"] do
+      %{"id" => _} = presence ->
+        map_state(result, &presence_join(&1, identifier, presence["id"], presence["info"]))
+
+      _ ->
+        result
+    end
+  end
+
+  defp after_command(result, "unsubscribe", 1, %{"identifier" => identifier}) do
+    map_state(result, fn state ->
+      case Map.pop(state.presence_streams, identifier) do
+        {nil, _} ->
+          state
+
+        {stream, presence_streams} ->
+          :ok = Presence.leave(state.instance, stream, state.socket_id)
+          %{state | presence_streams: presence_streams}
+      end
+    end)
+  end
+
+  defp after_command(result, _command, _status, _msg), do: result
+
+  defp map_state({:ok, state}, fun), do: {:ok, fun.(state)}
+  defp map_state({:push, frames, state}, fun), do: {:push, frames, fun.(state)}
+
+  defp map_state({:stop, reason, close, frames, state}, fun),
+    do: {:stop, reason, close, frames, fun.(state)}
+
+  defp put_presence_stream(state, identifier, stream) when is_binary(stream) and stream != "" do
+    %{state | presence_streams: Map.put(state.presence_streams, identifier, stream)}
+  end
+
+  defp put_presence_stream(state, _identifier, _stream), do: state
+
+  defp apply_rpc_presence(state, identifier, %{"type" => "join", "id" => id} = presence) do
+    presence_join(state, identifier, id, decode_info(presence["info"]))
+  end
+
+  defp apply_rpc_presence(state, identifier, %{"type" => "leave"}) do
+    presence_leave(state, identifier)
+  end
+
+  defp apply_rpc_presence(state, _identifier, _presence), do: state
+
+  defp handle_presence_command(
+         "join",
+         identifier,
+         %{"presence" => %{"id" => id} = presence},
+         state
+       ) do
+    {:ok, presence_join(state, identifier, id, presence["info"])}
+  end
+
+  defp handle_presence_command("join", _identifier, _msg, state) do
+    Logger.warning("Embassy.Rails.Connection: presence join without presence data")
+    {:ok, state}
+  end
+
+  defp handle_presence_command("leave", identifier, _msg, state) do
+    {:ok, presence_leave(state, identifier)}
+  end
+
+  defp handle_presence_command("presence", identifier, msg, state) do
+    return_records? =
+      case msg["data"] do
+        %{"return_records" => false} -> false
+        _ -> true
+      end
+
+    # anycable-go stays silent when the identifier has no presence stream;
+    # replying with an error lets the JS client's info() promise reject
+    # instead of hanging.
+    message =
+      with stream when is_binary(stream) <- state.presence_streams[identifier],
+           {:ok, info} <- Presence.info(state.instance, stream, return_records?) do
+        info
+      else
+        _ -> %{"type" => "error"}
+      end
+
+    {:push, presence_frame(identifier, message), state}
+  end
+
+  defp presence_join(state, identifier, id, info) do
+    with stream when is_binary(stream) <- state.presence_streams[identifier],
+         :ok <- Presence.join(state.instance, stream, state.socket_id, to_string(id), info) do
+      state
+    else
+      nil ->
+        Logger.warning("Embassy.Rails.Connection: presence join without a presence stream")
+        state
+
+      {:error, reason} ->
+        Logger.warning("Embassy.Rails.Connection: presence join failed: #{inspect(reason)}")
+        state
+    end
+  end
+
+  defp presence_leave(state, identifier) do
+    case state.presence_streams[identifier] do
+      nil ->
+        Logger.warning("Embassy.Rails.Connection: presence leave without a presence stream")
+        state
+
+      stream ->
+        :ok = Presence.leave(state.instance, stream, state.socket_id)
+        state
+    end
+  end
+
+  defp presence_frame(identifier, message) do
+    {:text, Jason.encode!(%{type: "presence", identifier: identifier, message: message})}
+  end
+
+  defp decode_info(nil), do: nil
+  defp decode_info(""), do: nil
+  defp decode_info(info), do: decode_data(info)
 
   # AnyCable's EnvResponse carries only the keys that changed; merge them
   # (as anycable-go does) rather than replace the whole state.

@@ -56,6 +56,14 @@ defmodule Embassy.Rails.UpgradeTest do
     # the resp-header echo above is sufficient evidence that the upgrade path was taken.
   end
 
+  test "echoes actioncable-v1-ext-json when requested", %{opts: opts} do
+    conn =
+      ws_conn(headers: [{"sec-websocket-protocol", "actioncable-v1-ext-json"}])
+      |> Upgrade.call(opts)
+
+    assert ["actioncable-v1-ext-json"] = Plug.Conn.get_resp_header(conn, "sec-websocket-protocol")
+  end
+
   test "echoes the first matching subprotocol when several requested", %{opts: opts} do
     conn =
       ws_conn(headers: [{"sec-websocket-protocol", "graphql-ws, actioncable-v1-json"}])

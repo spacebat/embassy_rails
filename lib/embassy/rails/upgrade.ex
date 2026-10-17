@@ -27,7 +27,9 @@ defmodule Embassy.Rails.Upgrade do
 
   require Logger
 
-  @default_subprotocols ["actioncable-v1-json"]
+  # ext-json carries AnyCable's presence commands; plain json clients are
+  # unaffected.
+  @default_subprotocols ["actioncable-v1-ext-json", "actioncable-v1-json"]
   @forwarded_headers ~w(cookie user-agent origin x-forwarded-for x-real-ip)
 
   @impl Plug
@@ -74,7 +76,8 @@ defmodule Embassy.Rails.Upgrade do
       identifiers: nil,
       cstate: %{},
       istate: %{},
-      streams: %{}
+      streams: %{},
+      presence_streams: %{}
     }
 
     conn
