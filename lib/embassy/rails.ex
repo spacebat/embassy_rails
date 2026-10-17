@@ -293,9 +293,15 @@ defmodule Embassy.Rails do
   defp presence_children(_name, _pubsub, nil), do: []
 
   defp presence_children(name, pubsub, presence) do
+    # Runs in this supervisor's init, which makes it the table's owner.
+    Embassy.Rails.PresenceTracker.new_counts_table(name)
+
     [
       {Embassy.Rails.PresenceTracker,
-       instance: name, pubsub: pubsub, name: Embassy.Rails.Presence.tracker_name(name)},
+       instance: name,
+       pubsub: pubsub,
+       ttl_ms: presence.ttl_ms,
+       name: Embassy.Rails.Presence.tracker_name(name)},
       {Embassy.Rails.Presence, instance: name, ttl_ms: presence.ttl_ms}
     ]
   end

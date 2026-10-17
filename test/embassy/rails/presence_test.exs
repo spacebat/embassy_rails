@@ -140,6 +140,32 @@ defmodule Embassy.Rails.PresenceTest do
     assert_receive {:cable_presence, "room", %{"type" => "join", "id" => "u3"}}
   end
 
+  test "a tracker shard crash sends a leave for what it had announced", %{instance: instance} do
+    subscribe("room")
+    :ok = Presence.join(instance, "room", "sid1", "u1", nil)
+    assert_receive {:cable_presence, "room", %{"type" => "join", "id" => "u1"}}
+
+    instance
+    |> Presence.tracker_name()
+    |> Phoenix.Tracker.Shard.name_for_number(0)
+    |> Process.whereis()
+    |> Process.exit(:kill)
+
+    assert_receive {:cable_presence, "room", %{"type" => "leave", "id" => "u1"}}, 1_000
+  end
+
+  test "remote nodes keep a dead node's entries for ttl_ms (the tracker down_period)" do
+    instance = start_instance(__MODULE__.LongTtl, presence: [ttl_ms: 90_000])
+
+    shard =
+      instance
+      |> Presence.tracker_name()
+      |> Phoenix.Tracker.Shard.name_for_number(0)
+      |> Process.whereis()
+
+    assert %{down_period: 90_000} = :sys.get_state(shard)
+  end
+
   test "a session can rejoin after the tracker shard crashes", %{instance: instance} do
     :ok = Presence.join(instance, "room", "sid1", "u1", nil)
     server = Process.whereis(Presence.server_name(instance))

@@ -78,7 +78,8 @@ AnyCable presence works as in anycable-go, cluster-wide on `Phoenix.Tracker`
 - JS clients use `protocol: "actioncable-v1-ext-json"` for
   `channel.presence.join/leave/info` and presence events.
 - A disconnected client stays present for `ttl_ms`, so a quick reconnect is
-  never seen as a leave.
+  never seen as a leave. A node that dies is kept on the others for
+  `ttl_ms` too (the tracker's `down_period`).
 - `Embassy.Rails.PresenceApiPlug` serves anycable-go's REST API:
 
       forward "/api/presence", Embassy.Rails.PresenceApiPlug,

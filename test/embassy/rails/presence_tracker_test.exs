@@ -6,7 +6,9 @@ defmodule Embassy.Rails.PresenceTrackerTest do
   setup do
     start_supervised!({Phoenix.PubSub, name: __MODULE__.PubSub})
     Phoenix.PubSub.subscribe(__MODULE__.PubSub, Broadcast.topic("s"))
-    {:ok, state} = PresenceTracker.init(instance: :inst, pubsub: __MODULE__.PubSub)
+    instance = Module.concat(__MODULE__, "I#{System.unique_integer([:positive])}")
+    PresenceTracker.new_counts_table(instance)
+    {:ok, state} = PresenceTracker.init(instance: instance, pubsub: __MODULE__.PubSub)
     {:ok, state: state}
   end
 

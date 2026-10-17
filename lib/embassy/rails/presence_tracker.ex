@@ -14,7 +14,15 @@ defmodule Embassy.Rails.PresenceTracker do
 
   `Phoenix.Tracker` calls `handle_diff/2` before it commits the change, and
   reading the tracker from inside the callback would call into the same
-  shard, so the session counts per presence id are kept here.
+  shard, so the session counts per presence id are kept here, in an ETS
+  table owned by the `Embassy.Rails` supervisor. If the shard crashes, its
+  entries go with it but the counts survive: the restarted shard sends a
+  `leave` for every id it had announced, and ids still present on other
+  nodes join again as it resyncs.
+
+  The tracker's `down_period` is the instance's `ttl_ms` (at least 3s), so
+  other nodes keep a dead node's entries for the TTL, as they keep a
+  disconnected session's.
 
   Telemetry `[:embassy_rails, :presence, :join | :leave]` (measurement
   `count: 1`, metadata `instance`, `stream`, `id`) fires on every node for
@@ -29,35 +37,54 @@ defmodule Embassy.Rails.PresenceTracker do
   def start_link(opts) do
     instance = Keyword.fetch!(opts, :instance)
     pubsub = Keyword.fetch!(opts, :pubsub)
+    # At least twice Phoenix.Tracker's 1500ms broadcast period.
+    down_period = max(Keyword.fetch!(opts, :ttl_ms), 3_000)
 
     Phoenix.Tracker.start_link(__MODULE__, [instance: instance, pubsub: pubsub],
       name: Keyword.fetch!(opts, :name),
       pubsub_server: pubsub,
-      pool_size: 1
+      pool_size: 1,
+      down_period: down_period,
+      permdown_period: max(1_200_000, down_period * 2)
     )
   end
 
+  @doc false
+  # Called from the Embassy.Rails supervisor's init, so the table outlives
+  # a tracker shard.
+  def new_counts_table(instance) do
+    :ets.new(counts_table(instance), [:set, :public, :named_table])
+  end
+
+  defp counts_table(instance), do: Module.concat(instance, PresenceCounts)
+
   @impl Phoenix.Tracker
   def init(opts) do
-    {:ok,
-     %{
-       instance: Keyword.fetch!(opts, :instance),
-       pubsub: Keyword.fetch!(opts, :pubsub),
-       counts: %{}
-     }}
+    state = %{
+      instance: Keyword.fetch!(opts, :instance),
+      pubsub: Keyword.fetch!(opts, :pubsub),
+      counts: counts_table(Keyword.fetch!(opts, :instance))
+    }
+
+    # Left over from a crashed shard: its entries are gone.
+    for {{stream, id}, _count} <- :ets.tab2list(state.counts) do
+      announce(state, stream, %{"type" => "leave", "id" => id})
+    end
+
+    :ets.delete_all_objects(state.counts)
+    {:ok, state}
   end
 
   @impl Phoenix.Tracker
   def handle_diff(diff, state) do
-    counts =
-      Enum.reduce(diff, state.counts, fn {stream, {joins, leaves}}, counts ->
-        apply_stream_diff(state, stream, joins, leaves, counts)
-      end)
+    Enum.each(diff, fn {stream, {joins, leaves}} ->
+      apply_stream_diff(state, stream, joins, leaves)
+    end)
 
-    {:ok, %{state | counts: counts}}
+    {:ok, state}
   end
 
-  defp apply_stream_diff(state, stream, joins, leaves, counts) do
+  defp apply_stream_diff(state, stream, joins, leaves) do
     deltas =
       Enum.reduce(leaves, %{}, fn {_sid, meta}, acc -> Map.update(acc, meta.id, -1, &(&1 - 1)) end)
 
@@ -68,12 +95,19 @@ defmodule Embassy.Rails.PresenceTracker do
 
     join_info = Map.new(joins, fn {_sid, meta} -> {meta.id, meta.info} end)
 
-    Enum.reduce(deltas, counts, fn
-      {_id, 0}, counts ->
-        counts
+    Enum.each(deltas, fn
+      {_id, 0} ->
+        :ok
 
-      {id, delta}, counts ->
-        before = Map.get(counts, {stream, id}, 0)
+      {id, delta} ->
+        key = {stream, id}
+
+        before =
+          case :ets.lookup(state.counts, key) do
+            [{^key, count}] -> count
+            [] -> 0
+          end
+
         after_count = max(before + delta, 0)
 
         cond do
@@ -88,8 +122,8 @@ defmodule Embassy.Rails.PresenceTracker do
         end
 
         if after_count == 0,
-          do: Map.delete(counts, {stream, id}),
-          else: Map.put(counts, {stream, id}, after_count)
+          do: :ets.delete(state.counts, key),
+          else: :ets.insert(state.counts, {key, after_count})
     end)
   end
 
