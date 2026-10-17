@@ -38,9 +38,9 @@ defmodule Embassy.Rails.Connection do
 
   @impl WebSock
   def init(state) do
-    case RPC.connect(state.instance, build_env(state)) do
+    case RPC.connect(state.instance, build_env(state, :connect)) do
       {:ok, %{"status" => 1} = resp} ->
-        state = merge_env(%{state | identifiers: resp["identifiers"]}, resp["env"])
+        state = merge_env(%{state | identifiers: resp["identifiers"]}, resp["env"], nil)
 
         :telemetry.execute(
           [:embassy_rails, :ws, :connection, :open],
@@ -146,7 +146,7 @@ defmodule Embassy.Rails.Connection do
     RPC.disconnect(state.instance, %{
       identifiers: state.identifiers,
       subscriptions: state.streams |> Map.values() |> Enum.uniq(),
-      env: build_env(state)
+      env: build_env(state, :disconnect)
     })
 
     :telemetry.execute(
@@ -160,9 +160,25 @@ defmodule Embassy.Rails.Connection do
 
   # --- private helpers ---
 
-  defp build_env(state) do
-    %{url: state.url, headers: state.headers, cstate: state.cstate, istate: state.istate}
+  # istate is kept per channel identifier, as anycable-go does: a command
+  # carries only its own channel's state, and the disconnect carries every
+  # channel's state JSON-encoded under its identifier (anycable-rails
+  # decodes `istate[identifier]` for each `unsubscribed` callback).
+  defp build_env(state, scope) do
+    %{
+      url: state.url,
+      headers: state.headers,
+      cstate: state.cstate,
+      istate: istate_for(state, scope)
+    }
   end
+
+  defp istate_for(_state, :connect), do: %{}
+
+  defp istate_for(state, :disconnect),
+    do: Map.new(state.istate, fn {identifier, map} -> {identifier, Jason.encode!(map)} end)
+
+  defp istate_for(state, identifier), do: Map.get(state.istate, identifier, %{})
 
   defp connect_frames([first | _] = transmissions) do
     if welcome?(first),
@@ -203,7 +219,7 @@ defmodule Embassy.Rails.Connection do
       identifier: identifier,
       data: msg["data"] || "",
       connection_identifiers: state.identifiers,
-      env: build_env(state)
+      env: build_env(state, identifier)
     }
 
     case RPC.command(state.instance, payload) do
@@ -227,7 +243,7 @@ defmodule Embassy.Rails.Connection do
   defp apply_command_response(resp, identifier, state) do
     state =
       state
-      |> merge_env(resp["env"])
+      |> merge_env(resp["env"], identifier)
       |> add_streams(resp["streams"] || [], identifier)
       |> drop_streams(resp["stopped_streams"] || [])
       |> maybe_stop_all_streams(resp["stop_streams"], identifier)
@@ -267,6 +283,7 @@ defmodule Embassy.Rails.Connection do
           :ok = Presence.leave(state.instance, stream, state.socket_id)
           %{state | presence_streams: presence_streams}
       end
+      |> Map.update!(:istate, &Map.delete(&1, identifier))
     end)
   end
 
@@ -369,15 +386,31 @@ defmodule Embassy.Rails.Connection do
   defp decode_info(info), do: decode_data(info)
 
   # AnyCable's EnvResponse carries only the keys that changed; merge them
-  # (as anycable-go does) rather than replace the whole state.
-  defp merge_env(state, nil), do: state
+  # (as anycable-go does) rather than replace the whole state. An empty
+  # string deletes the key. istate is merged into the replying channel's
+  # own map; a connect reply has no channel and carries no istate.
+  defp merge_env(state, nil, _identifier), do: state
 
-  defp merge_env(state, env) do
-    %{
-      state
-      | cstate: Map.merge(state.cstate, env["cstate"] || %{}),
-        istate: Map.merge(state.istate, env["istate"] || %{})
-    }
+  defp merge_env(state, env, identifier) do
+    state = %{state | cstate: merge_state(state.cstate, env["cstate"])}
+
+    case identifier do
+      nil ->
+        state
+
+      identifier ->
+        channel = merge_state(Map.get(state.istate, identifier, %{}), env["istate"])
+        %{state | istate: Map.put(state.istate, identifier, channel)}
+    end
+  end
+
+  defp merge_state(current, nil), do: current
+
+  defp merge_state(current, changes) do
+    Enum.reduce(changes, current, fn
+      {key, ""}, acc -> Map.delete(acc, key)
+      {key, value}, acc -> Map.put(acc, key, value)
+    end)
   end
 
   defp add_streams(state, streams, identifier) do

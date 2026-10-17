@@ -48,11 +48,3 @@ The `actioncable-v1-msgpack` subprotocol is not advertised and binary frames
 are not decoded. This is acceptable for all JSON-only workloads (the vast
 majority of AnyCable deployments). Mention in docs so consumers are not
 surprised.
-
-### Multi-channel istate at disconnect
-
-When a connection with multiple active subscriptions terminates, `terminate/2`
-sends one `Disconnect` RPC with the connection-level `env` (carrying the last
-channel's `istate`). This matches how `anycable-go` behaves. For Rails channels
-that rely on per-channel `istate` at teardown, the istate for all channels
-except the last will be wrong. No known real-world impact.

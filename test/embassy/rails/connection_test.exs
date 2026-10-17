@@ -299,7 +299,8 @@ defmodule Embassy.Rails.ConnectionTest do
 
   test "command reply merges changed istate/cstate keys into existing state",
        %{bypass: bypass, state: state} do
-    state = %{state | identifiers: "abc", istate: %{"a" => "1"}, cstate: %{"c" => "1"}}
+    x = ~s({"channel":"X"})
+    state = %{state | identifiers: "abc", istate: %{x => %{"a" => "1"}}, cstate: %{"c" => "1"}}
 
     Bypass.expect_once(bypass, "POST", "/_anycable/command", fn conn ->
       Plug.Conn.resp(
@@ -309,10 +310,94 @@ defmodule Embassy.Rails.ConnectionTest do
       )
     end)
 
-    frame = Jason.encode!(%{command: "subscribe", identifier: ~s({"channel":"X"})})
+    frame = Jason.encode!(%{command: "subscribe", identifier: x})
     assert {:ok, new_state} = Connection.handle_in({frame, [opcode: :text]}, state)
-    assert new_state.istate == %{"a" => "1", "$p" => "s1"}
+    assert new_state.istate == %{x => %{"a" => "1", "$p" => "s1"}}
     assert new_state.cstate == %{"c" => "1"}
+  end
+
+  describe "channel state (istate) per identifier" do
+    @chan_a ~s({"channel":"Chat","room":1})
+    @chan_b ~s({"channel":"Chat","room":2})
+
+    # Replies to each command with `reply.(request)` and forwards every
+    # request body to the test process.
+    defp capture_rpc(bypass, path, reply) do
+      test_pid = self()
+
+      Bypass.stub(bypass, "POST", path, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        request = Jason.decode!(body)
+        send(test_pid, {:rpc, path, request})
+        Plug.Conn.resp(conn, 200, Jason.encode!(reply.(request)))
+      end)
+    end
+
+    defp command_reply(%{"command" => "subscribe", "identifier" => @chan_a}),
+      do: %{"status" => 1, "env" => %{"istate" => %{"room_id" => "1", "w" => "x"}}}
+
+    defp command_reply(%{"command" => "subscribe", "identifier" => @chan_b}),
+      do: %{"status" => 1, "env" => %{"istate" => %{"room_id" => "2"}}}
+
+    defp command_reply(%{"command" => "message"}),
+      do: %{"status" => 1, "env" => %{"istate" => %{"w" => ""}, "cstate" => %{"c" => ""}}}
+
+    defp command_reply(_), do: %{"status" => 1}
+
+    defp run(state, command, identifier) do
+      frame = Jason.encode!(%{command: command, identifier: identifier, data: "{}"})
+      {:ok, state} = Connection.handle_in({frame, [opcode: :text]}, state)
+      state
+    end
+
+    setup %{bypass: bypass, state: state} do
+      capture_rpc(bypass, "/_anycable/command", &command_reply/1)
+      state = %{state | identifiers: "abc", cstate: %{"c" => "1"}}
+      {:ok, state: state |> run("subscribe", @chan_a) |> run("subscribe", @chan_b)}
+    end
+
+    test "a command carries only its own channel's istate", %{state: state} do
+      flush_rpc()
+      run(state, "message", @chan_a)
+
+      assert_receive {:rpc, _, %{"command" => "message", "env" => %{"istate" => istate}}}
+      assert istate == %{"room_id" => "1", "w" => "x"}
+    end
+
+    test "an empty-string value deletes the key", %{state: state} do
+      state = run(state, "message", @chan_a)
+
+      assert state.istate[@chan_a] == %{"room_id" => "1"}
+      assert state.cstate == %{}
+    end
+
+    test "unsubscribe drops that channel's istate", %{state: state} do
+      state = run(state, "unsubscribe", @chan_a)
+
+      refute Map.has_key?(state.istate, @chan_a)
+      assert state.istate[@chan_b] == %{"room_id" => "2"}
+    end
+
+    test "disconnect sends each channel's istate as JSON keyed by identifier",
+         %{bypass: bypass, state: state} do
+      capture_rpc(bypass, "/_anycable/disconnect", fn _ -> %{"status" => 1} end)
+
+      Connection.terminate(:normal, state)
+
+      assert_receive {:rpc, "/_anycable/disconnect", %{"env" => %{"istate" => istate}}}
+
+      assert %{@chan_a => a, @chan_b => b} = istate
+      assert Jason.decode!(a) == %{"room_id" => "1", "w" => "x"}
+      assert Jason.decode!(b) == %{"room_id" => "2"}
+    end
+
+    defp flush_rpc do
+      receive do
+        {:rpc, _, _} -> flush_rpc()
+      after
+        0 -> :ok
+      end
+    end
   end
 
   describe "presence" do
