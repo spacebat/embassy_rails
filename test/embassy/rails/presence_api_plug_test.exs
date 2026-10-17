@@ -55,7 +55,28 @@ defmodule Embassy.Rails.PresenceApiPlugTest do
     assert ["application/json" <> _] = Plug.Conn.get_resp_header(conn, "content-type")
 
     assert Jason.decode!(conn.resp_body) ==
-             %{"type" => "info", "total" => 1, "records" => [%{"id" => "dev-1", "info" => nil}]}
+             %{"type" => "info", "total" => 1, "records" => [%{"id" => "dev-1"}]}
+  end
+
+  test "an empty stream answers without records, as anycable-go does" do
+    instance = start_instance(api_secret: "sekret")
+
+    assert Jason.decode!(get_users(instance, "nobody").resp_body) ==
+             %{"type" => "info", "total" => 0}
+  end
+
+  test "an upstream with an empty stream (no records key) is not a failure" do
+    bypass = Bypass.open()
+    instance = start_instance(api_secret: "sekret", upstream: "http://localhost:#{bypass.port}")
+    :ok = Presence.join(instance, "s1", "sid1", "a", nil)
+
+    Bypass.expect_once(bypass, "GET", "/api/presence/s1/users", fn conn ->
+      Plug.Conn.resp(conn, 200, ~s({"type":"info","total":0}))
+    end)
+
+    conn = get_users(instance, "s1")
+    assert conn.status == 200
+    assert Jason.decode!(conn.resp_body)["records"] == [%{"id" => "a"}]
   end
 
   test "decodes percent escapes only, keeping a literal + (as anycable-go does)" do

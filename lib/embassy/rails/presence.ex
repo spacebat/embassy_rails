@@ -84,15 +84,18 @@ defmodule Embassy.Rails.Presence do
   @doc """
   The presence set of `stream` in anycable-go's shape:
   `%{"type" => "info", "total" => n, "records" => [%{"id" => id, "info" => info}]}`.
-  `"records"` is left out when `return_records?` is false. A record's info
-  is from that id's most recent join.
+  `"records"` is left out when `return_records?` is false or there are none,
+  and `"info"` when a record has none. A record's info is from that id's
+  most recent join.
   """
   @spec info(atom(), String.t(), boolean()) :: {:ok, map()} | {:error, :disabled}
   def info(instance, stream, return_records?) do
     if enabled?(instance) do
       records = records(instance, stream)
       base = %{"type" => "info", "total" => length(records)}
-      {:ok, if(return_records?, do: Map.put(base, "records", records), else: base)}
+      # anycable-go omits empty records (and a record's nil info).
+      {:ok,
+       if(return_records? and records != [], do: Map.put(base, "records", records), else: base)}
     else
       {:error, :disabled}
     end
@@ -105,7 +108,7 @@ defmodule Embassy.Rails.Presence do
     |> Enum.group_by(fn {_sid, meta} -> meta.id end, fn {_sid, meta} -> meta end)
     |> Enum.map(fn {id, metas} ->
       latest = Enum.max_by(metas, & &1.at)
-      %{"id" => id, "info" => latest.info}
+      if latest.info == nil, do: %{"id" => id}, else: %{"id" => id, "info" => latest.info}
     end)
   end
 

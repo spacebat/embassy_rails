@@ -10,6 +10,9 @@ defmodule Embassy.Rails.PresenceApiPlug do
 
       {"type": "info", "total": 2, "records": [{"id": "u1", "info": {...}}, ...]}
 
+  As in anycable-go, `records` is left out when there are none, and `info`
+  when a record has none.
+
   Bearer auth against `presence: [api_secret: ...]`. With no secret (the
   default) the endpoint is open, and anyone who can reach it can list the
   presence ids of any stream: set a secret, or keep the route off the
@@ -62,7 +65,8 @@ defmodule Embassy.Rails.PresenceApiPlug do
   end
 
   defp union(conn, instance, snap, stream, encoded) do
-    {:ok, %{"records" => local}} = Presence.info(instance, stream, true)
+    {:ok, info} = Presence.info(instance, stream, true)
+    local = Map.get(info, "records", [])
 
     case upstream(snap, encoded) do
       :none -> respond(conn, local)
@@ -90,15 +94,17 @@ defmodule Embassy.Rails.PresenceApiPlug do
            Finch.request(Finch.build(:get, url, headers), finch,
              receive_timeout: @upstream_timeout
            ),
-         {:ok, %{"records" => records}} when is_list(records) <- Jason.decode(body) do
-      {:ok, for(%{"id" => id} = record <- records, do: %{"id" => id, "info" => record["info"]})}
+         {:ok, %{} = info} <- Jason.decode(body),
+         records when is_list(records) <- Map.get(info, "records", []) do
+      {:ok, for(%{"id" => _} = record <- records, do: Map.take(record, ["id", "info"]))}
     else
       other -> {:error, other}
     end
   end
 
   defp respond(conn, records) do
-    body = %{type: "info", total: length(records), records: records}
+    body = %{type: "info", total: length(records)}
+    body = if records == [], do: body, else: Map.put(body, :records, records)
 
     conn
     |> put_resp_content_type("application/json")

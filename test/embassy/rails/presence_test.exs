@@ -81,7 +81,7 @@ defmodule Embassy.Rails.PresenceTest do
     assert {:ok, info} = Presence.info(instance, "room", false)
     assert info == %{"type" => "info", "total" => 2}
 
-    assert {:ok, %{"total" => 0, "records" => []}} = Presence.info(instance, "empty", true)
+    assert {:ok, %{"type" => "info", "total" => 0}} == Presence.info(instance, "empty", true)
   end
 
   test "info counts one record per presence id", %{instance: instance} do
@@ -90,6 +90,15 @@ defmodule Embassy.Rails.PresenceTest do
 
     assert {:ok, %{"total" => 1, "records" => [%{"id" => "u1", "info" => %{"tab" => 2}}]}} =
              Presence.info(instance, "room", true)
+  end
+
+  test "a record without info has no info key", %{instance: instance} do
+    :ok = Presence.join(instance, "room", "sid1", "u1", nil)
+
+    assert {:ok, %{"records" => [%{"id" => "u1"} = record]}} =
+             Presence.info(instance, "room", true)
+
+    refute Map.has_key?(record, "info")
   end
 
   test "linger", %{instance: instance} do
