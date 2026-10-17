@@ -52,7 +52,10 @@ selected per instance with `broadcast: [source: ...]`:
   node, which re-broadcasts it cluster-wide, so a multi-node deployment
   needs a clustered `Phoenix.PubSub`. Requires Redis 6.2+ and the
   optional `:redix` dependency. Prefer this over `:redis` for new Redis
-  setups.
+  setups. Each entry is deleted once read, by this listener and by
+  anycable-go alike, so a stream must have one reader: do not run
+  anycable-go and Embassy.Rails on the same stream, even in different
+  consumer groups. Cut a stream over in one step.
 - `:redis` — `Embassy.Rails.RedisListener` subscribes to AnyCable's Redis
   Pub/Sub broadcaster channel (default `"__anycable__"`; Rails
   `broadcast_adapter: redis`). Fire-and-forget: a broadcast published
@@ -81,7 +84,10 @@ AnyCable presence works as in anycable-go, cluster-wide on `Phoenix.Tracker`
       forward "/api/presence", Embassy.Rails.PresenceApiPlug,
         embassy_rails: MyApp.Embassy.Rails
 
-  `GET /api/presence/:stream/users`, bearer `api_secret`. With `upstream:`
+  `GET /api/presence/:stream/users`, bearer `api_secret`. With no
+  `api_secret` (the default) the endpoint is open to anyone who can reach
+  it, and lists the presence ids of any stream: set one, or keep the route
+  off the public network. With `upstream:`
   set to an anycable-go base URL, its records are unioned in, and an upstream
   failure answers 503 rather than a partial list.
 

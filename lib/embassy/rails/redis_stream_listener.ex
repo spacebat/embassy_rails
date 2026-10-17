@@ -33,6 +33,11 @@ defmodule Embassy.Rails.RedisStreamListener do
   distributed Erlang, or any cross-node adapter); without one, a
   broadcast reaches only the subscribers on whichever node read it.
 
+  Every entry is `XDEL`ed once read, as anycable-go does, so a stream must
+  have a single reader. Another consumer group on the same stream, or an
+  anycable-go still reading it, loses entries: cut a stream over from
+  anycable-go in one step.
+
   Requires Redis 6.2 or newer (`XAUTOCLAIM`). The Ruby producer does not
   trim the stream, and entries are only deleted once consumed, so the
   stream grows while no consumer is running.

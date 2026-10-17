@@ -10,8 +10,10 @@ defmodule Embassy.Rails.PresenceApiPlug do
 
       {"type": "info", "total": 2, "records": [{"id": "u1", "info": {...}}, ...]}
 
-  Bearer auth against `presence: [api_secret: ...]`; with no secret the
-  endpoint is open. When `presence: [upstream: base_url]` is set (an
+  Bearer auth against `presence: [api_secret: ...]`. With no secret (the
+  default) the endpoint is open, and anyone who can reach it can list the
+  presence ids of any stream: set a secret, or keep the route off the
+  public network. (anycable-go derives an API secret by default.) When `presence: [upstream: base_url]` is set (an
   anycable-go still serving part of the traffic), its records are fetched
   with the same bearer and unioned by id. If the upstream fails the
   response is 503: a partial set would make callers think connected
