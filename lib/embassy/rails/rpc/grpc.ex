@@ -104,10 +104,10 @@ if Code.ensure_loaded?(GRPC.Stub) do
     # --- channel dispatch -------------------------------------------------
 
     @doc false
-    def call(instance, op, request) do
+    def call(instance, op, request, opts \\ []) do
       case GrpcChannel.fetch_channel(instance) do
         {:ok, channel} ->
-          case do_call(channel, op, request) do
+          case do_call(channel, op, request, opts) do
             {:error, {:grpc, _}} = err ->
               GrpcChannel.reconnect(instance)
               err
@@ -121,22 +121,22 @@ if Code.ensure_loaded?(GRPC.Stub) do
       end
     end
 
-    defp do_call(channel, :connect, request) do
-      case AnycableStub.connect(channel, request) do
+    defp do_call(channel, :connect, request, opts) do
+      case AnycableStub.connect(channel, request, opts) do
         {:ok, resp} -> {:ok, normalize_connect(resp)}
         {:error, reason} -> {:error, grpc_error(reason)}
       end
     end
 
-    defp do_call(channel, :command, request) do
-      case AnycableStub.command(channel, request) do
+    defp do_call(channel, :command, request, opts) do
+      case AnycableStub.command(channel, request, opts) do
         {:ok, resp} -> {:ok, normalize_command(resp)}
         {:error, reason} -> {:error, grpc_error(reason)}
       end
     end
 
-    defp do_call(channel, :disconnect, request) do
-      case AnycableStub.disconnect(channel, request) do
+    defp do_call(channel, :disconnect, request, opts) do
+      case AnycableStub.disconnect(channel, request, opts) do
         {:ok, resp} -> {:ok, normalize_disconnect(resp)}
         {:error, reason} -> {:error, grpc_error(reason)}
       end

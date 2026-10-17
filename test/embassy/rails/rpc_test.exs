@@ -135,4 +135,28 @@ defmodule Embassy.Rails.RPCTest do
     assert [{[:embassy_rails, :rpc, :exception], _measurements, meta}] = events
     assert meta.kind == :connect_error
   end
+
+  test "rpc :timeout bounds the HTTP call" do
+    # A listener that never answers: the kernel completes the TCP handshake
+    # from the backlog, so the request is sent and the reply never comes.
+    {:ok, listener} = :gen_tcp.listen(0, [:binary, active: false])
+    {:ok, port} = :inet.port(listener)
+    on_exit(fn -> :gen_tcp.close(listener) end)
+
+    start_supervised!(
+      {Embassy.Rails,
+       name: __MODULE__.Timeout,
+       embassy: Embassy.Rails.RPCTest.Embassy,
+       pubsub: Embassy.Rails.RPCTest.PubSub,
+       rpc: [transport: {:http, "http://localhost:#{port}"}, secret: "rpc-secret", timeout: 50],
+       broadcast: [source: :http, key: "bcast"]},
+      id: :timeout_instance
+    )
+
+    {elapsed_us, result} =
+      :timer.tc(fn -> RPC.command(__MODULE__.Timeout, %{command: "message"}) end)
+
+    assert {:error, %{reason: :timeout}} = result
+    assert elapsed_us < 1_000_000
+  end
 end

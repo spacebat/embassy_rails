@@ -275,4 +275,22 @@ defmodule Embassy.Rails.ConnectionTest do
     assert [{[:embassy_rails, :ws, :connection, :close], _measurements, meta}] = events
     assert meta.instance == Embassy.Rails.ConnectionTest.Instance
   end
+
+  test "command reply merges changed istate/cstate keys into existing state",
+       %{bypass: bypass, state: state} do
+    state = %{state | identifiers: "abc", istate: %{"a" => "1"}, cstate: %{"c" => "1"}}
+
+    Bypass.expect_once(bypass, "POST", "/_anycable/command", fn conn ->
+      Plug.Conn.resp(
+        conn,
+        200,
+        ~s({"status":1,"streams":[],"transmissions":[],"env":{"istate":{"$p":"s1"},"cstate":{}}})
+      )
+    end)
+
+    frame = Jason.encode!(%{command: "subscribe", identifier: ~s({"channel":"X"})})
+    assert {:ok, new_state} = Connection.handle_in({frame, [opcode: :text]}, state)
+    assert new_state.istate == %{"a" => "1", "$p" => "s1"}
+    assert new_state.cstate == %{"c" => "1"}
+  end
 end

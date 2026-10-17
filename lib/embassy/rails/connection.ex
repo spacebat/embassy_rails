@@ -25,13 +25,7 @@ defmodule Embassy.Rails.Connection do
   def init(state) do
     case RPC.connect(state.instance, build_env(state)) do
       {:ok, %{"status" => 1} = resp} ->
-        state =
-          %{
-            state
-            | identifiers: resp["identifiers"],
-              cstate: get_in(resp, ["env", "cstate"]) || %{},
-              istate: get_in(resp, ["env", "istate"]) || %{}
-          }
+        state = merge_env(%{state | identifiers: resp["identifiers"]}, resp["env"])
 
         :telemetry.execute(
           [:embassy_rails, :ws, :connection, :open],
@@ -177,8 +171,7 @@ defmodule Embassy.Rails.Connection do
   defp apply_command_response(resp, identifier, state) do
     state =
       state
-      |> Map.put(:cstate, get_in(resp, ["env", "cstate"]) || state.cstate)
-      |> Map.put(:istate, get_in(resp, ["env", "istate"]) || state.istate)
+      |> merge_env(resp["env"])
       |> add_streams(resp["streams"] || [], identifier)
       |> drop_streams(resp["stopped_streams"] || [])
       |> maybe_stop_all_streams(resp["stop_streams"], identifier)
@@ -190,6 +183,18 @@ defmodule Embassy.Rails.Connection do
       {_, []} -> {:ok, state}
       _ -> {:push, frames, state}
     end
+  end
+
+  # AnyCable's EnvResponse carries only the keys that changed; merge them
+  # (as anycable-go does) rather than replace the whole state.
+  defp merge_env(state, nil), do: state
+
+  defp merge_env(state, env) do
+    %{
+      state
+      | cstate: Map.merge(state.cstate, env["cstate"] || %{}),
+        istate: Map.merge(state.istate, env["istate"] || %{})
+    }
   end
 
   defp add_streams(state, streams, identifier) do

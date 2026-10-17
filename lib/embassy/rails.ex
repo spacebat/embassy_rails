@@ -19,7 +19,8 @@ defmodule Embassy.Rails do
     * `:rpc` — keyword. Must include `:transport` (`{:uds, path}`,
       `{:http, base_url}`, or `{:grpc, endpoint}`) and `:secret` (bearer
       token). The `:grpc` form requires the optional `:grpc` and
-      `:protobuf` deps.
+      `:protobuf` deps. Optional `:timeout` (ms, default 5000) bounds
+      each RPC call.
     * `:broadcast` — keyword. Must include `:source`. For
       `source: :http`: `:key` (bearer token for `POST /_broadcast`).
       For `source: :redis` (AnyCable's Pub/Sub broadcaster): `:redis` (a

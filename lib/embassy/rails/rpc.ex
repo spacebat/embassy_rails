@@ -16,6 +16,9 @@ defmodule Embassy.Rails.RPC do
     * `connect/2` — opens a logical AnyCable connection.
     * `command/2` — one per inbound WS frame from the client.
     * `disconnect/2` — fire-and-forget on socket close.
+
+  Each call is bounded by the instance's `rpc: [timeout: ms]` (default
+  5000).
   """
 
   alias Embassy.Rails.Config
@@ -64,7 +67,7 @@ defmodule Embassy.Rails.RPC do
       %{instance: instance, transport: transport}
     )
 
-    case Grpc.call(instance, op, request) do
+    case Grpc.call(instance, op, request, timeout: timeout(snap)) do
       {:ok, resp} = ok ->
         now = System.monotonic_time()
 
@@ -112,7 +115,7 @@ defmodule Embassy.Rails.RPC do
 
     req = Finch.build(:post, url, headers, Jason.encode!(body), finch_opts)
 
-    case Finch.request(req, snap.finch, receive_timeout: @timeout) do
+    case Finch.request(req, snap.finch, receive_timeout: timeout(snap)) do
       {:ok, %Finch.Response{status: 200, body: resp_body}} ->
         now = System.monotonic_time()
 
@@ -164,6 +167,8 @@ defmodule Embassy.Rails.RPC do
         {:error, reason}
     end
   end
+
+  defp timeout(snap), do: snap.rpc[:timeout] || @timeout
 
   defp request_target(path, {:uds, socket_path}),
     do: {"http://upstream" <> path, [unix_socket: socket_path]}
