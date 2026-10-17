@@ -2,7 +2,7 @@ defmodule EmbassyRails.MixProject do
   use Mix.Project
 
   @source_url "https://github.com/spacebat/embassy_rails"
-  @version "0.3.0-dev"
+  @version "0.3.0"
 
   def project do
     [
@@ -67,6 +67,7 @@ defmodule EmbassyRails.MixProject do
       {:protobuf, "~> 0.17", optional: true},
       {:grpc_server, "~> 1.0", only: :test},
       {:telemetry, "~> 1.2"},
+      {:telemetry_metrics, "~> 1.0", optional: true},
       {:bypass, "~> 2.1", only: :test},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},

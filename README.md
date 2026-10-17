@@ -8,7 +8,7 @@ backend via AnyCable's HTTP RPC and broadcast protocols.
 per-instance config harness) and `Phoenix.PubSub` to form a complete
 Phoenix-as-front-door deployment for Rails.
 
-## What ships in v0.2
+## What ships in v0.3
 
 - **`Embassy.Rails.Upgrade`** — WS upgrade plug with subprotocol
   negotiation (defaults to `actioncable-v1-json`).
@@ -165,7 +165,19 @@ and gRPC transports unchanged.
 
 Subscribe to `:telemetry` events with the `[:embassy_rails | _]` prefix
 for RPC timing, broadcast volume, upgrade rejections, and WS lifecycle
-counts.
+counts. With the optional `:telemetry_metrics` dependency,
+`Embassy.Rails.Telemetry.metrics/0` gives ready-made `Telemetry.Metrics`
+definitions for a reporter.
+
+## Operations
+
+- `{Embassy.Rails.Drain, instance: MyApp.Embassy.Rails, window_ms: 30_000}`,
+  placed after the Endpoint in the supervision tree, closes connections in
+  batches with a reconnecting `server_restart` disconnect on shutdown. Keep
+  the window inside `terminationGracePeriodSeconds`.
+- `Embassy.Rails.Health.ready?/1` for the readiness probe (not liveness).
+- `ping_interval:` and `max_mailbox:` instance options tune pings and the
+  slow-client cutoff.
 
 ## Composition with `embassy`
 
