@@ -6,9 +6,11 @@ defmodule Embassy.Rails.Config do
   `Embassy.Rails` supervisor. Lookup is O(1) and safe to call once per
   request or once per WebSocket callback.
 
-  The `:broadcast` keyword carries `source: :http | :redis`. For `:http`
-  it also carries `:key`; for `:redis` it carries `:redis` (URL or opts)
-  and optionally `:channel`.
+  The `:broadcast` keyword carries `source: :http | :redis | :redisx`.
+  For `:http` it also carries `:key`; for `:redis` it carries `:redis`
+  (URL or opts) and optionally `:channel`; for `:redisx` it carries
+  `:redis` and optionally `:stream`, `:group`, `:block_ms` and
+  `:consumer`.
   """
 
   @typedoc """

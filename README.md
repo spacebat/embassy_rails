@@ -20,7 +20,9 @@ Phoenix-as-front-door deployment for Rails.
 - **`Embassy.Rails.BroadcastPlug`** — HTTP `/_broadcast` endpoint Plug
   for AnyCable's broadcast adapter.
 - **`Embassy.Rails.Broadcast`** — PubSub fan-out helper.
-- **`Embassy.Rails.RedisListener`** — AnyCable Redis broadcaster source.
+- **`Embassy.Rails.RedisListener`** — AnyCable Redis Pub/Sub broadcaster source.
+- **`Embassy.Rails.RedisStreamListener`** — AnyCable Redis Streams
+  (`redisx`) broadcaster source.
 - **`Embassy.Rails`** supervisor + **`Embassy.Rails.Config`** — per-
   instance plumbing.
 - `:telemetry` for RPC, broadcast, upgrade, and WS lifecycle.
@@ -32,14 +34,29 @@ Phoenix-as-front-door deployment for Rails.
 
 ## Broadcast sources
 
-Broadcasts from Rails reach connected clients via one of two sources,
+Broadcasts from Rails reach connected clients via one of three sources,
 selected per instance with `broadcast: [source: ...]`:
 
 - `:http` — AnyCable's HTTP broadcaster posts to `Embassy.Rails.BroadcastPlug`.
+- `:redisx` — `Embassy.Rails.RedisStreamListener` consumes AnyCable's Redis
+  Streams broadcaster, with the same defaults as anycable-go (stream
+  `"__anycable__"`, consumer group `"bx"`). In Rails, set
+  `broadcast_adapter: redisx` in `config/anycable.yml` (or
+  `ANYCABLE_BROADCAST_ADAPTER=redisx`). Delivery is at-least-once and
+  survives a terminator restart. Each broadcast is read by one terminator
+  node, which re-broadcasts it cluster-wide, so a multi-node deployment
+  needs a clustered `Phoenix.PubSub`. Requires Redis 6.2+ and the
+  optional `:redix` dependency. Prefer this over `:redis` for new Redis
+  setups.
 - `:redis` — `Embassy.Rails.RedisListener` subscribes to AnyCable's Redis
-  broadcaster channel (default `"__anycable__"`). Requires the optional
-  `:redix` dependency. Useful when scaling terminator nodes horizontally
-  or when Rails and the terminators should communicate only through Redis.
+  Pub/Sub broadcaster channel (default `"__anycable__"`; Rails
+  `broadcast_adapter: redis`). Fire-and-forget: a broadcast published
+  while a node is disconnected is lost. Every node subscribes, so no
+  clustered PubSub is needed. Requires the optional `:redix` dependency.
+
+All three accept AnyCable's batched broadcasts (a JSON array of
+envelopes). Remote commands such as `remote_connections.disconnect` are
+received but ignored.
 
 ## Installer
 

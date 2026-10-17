@@ -22,10 +22,14 @@ defmodule Embassy.Rails do
       `:protobuf` deps.
     * `:broadcast` — keyword. Must include `:source`. For
       `source: :http`: `:key` (bearer token for `POST /_broadcast`).
-      For `source: :redis`: `:redis` (a `Redix.PubSub` URL string or
-      options keyword) and optionally `:channel` (defaults to
-      `"__anycable__"`). The `:redis` source requires the optional
-      `:redix` dependency.
+      For `source: :redis` (AnyCable's Pub/Sub broadcaster): `:redis` (a
+      `Redix.PubSub` URL string or options keyword) and optionally
+      `:channel` (defaults to `"__anycable__"`). For `source: :redisx`
+      (AnyCable's Redis Streams broadcaster): `:redis` (a Redis URL or
+      `Redix` options) and optionally `:stream` (`"__anycable__"`),
+      `:group` (`"bx"`), `:block_ms` (`2000`) and `:consumer`; see
+      `Embassy.Rails.RedisStreamListener`. Both Redis sources require the
+      optional `:redix` dependency.
 
   ## Example
 
@@ -52,7 +56,11 @@ defmodule Embassy.Rails do
          rpc: [transport: {:uds, "/tmp/puma.sock"}, secret: "..."],
          broadcast: [source: :redis, redis: "redis://localhost:6379/1"]}
 
-  Requires `{:redix, "~> 1.0"}` in the consumer's deps.
+  Requires `{:redix, "~> 1.0"}` in the consumer's deps. For Redis
+  Streams, use `source: :redisx` with the same `:redis` option and set
+  `broadcast_adapter: redisx` on the Rails side. Each entry reaches one
+  node, which re-broadcasts it cluster-wide, so a multi-node deployment
+  needs a clustered `Phoenix.PubSub`.
   """
 
   use Supervisor
@@ -136,13 +144,25 @@ defmodule Embassy.Rails do
 
   @doc false
   def validate_broadcast!(broadcast, redix_available?) do
-    if Keyword.get(broadcast, :source) == :redis and not redix_available? do
-      raise ArgumentError,
-            "Embassy.Rails: broadcast source :redis requires the :redix dependency; " <>
-              "add {:redix, \"~> 1.0\"} to your deps"
-    end
+    case Keyword.get(broadcast, :source) do
+      source when source in [:redis, :redisx] ->
+        unless redix_available? do
+          raise ArgumentError,
+                "Embassy.Rails: broadcast source #{inspect(source)} requires the :redix dependency; " <>
+                  "add {:redix, \"~> 1.0\"} to your deps"
+        end
 
-    :ok
+        unless Keyword.has_key?(broadcast, :redis) do
+          raise ArgumentError,
+                "Embassy.Rails: broadcast source #{inspect(source)} requires a :redis option " <>
+                  "(a Redis URL or Redix options)"
+        end
+
+        :ok
+
+      _ ->
+        :ok
+    end
   end
 
   @doc false
@@ -190,6 +210,13 @@ defmodule Embassy.Rails do
            redis: Keyword.fetch!(broadcast, :redis),
            channel: Keyword.get(broadcast, :channel)}
         ]
+
+      :redisx ->
+        listener_opts =
+          [instance: name, redis: Keyword.fetch!(broadcast, :redis)] ++
+            Keyword.take(broadcast, [:stream, :group, :block_ms, :consumer])
+
+        [{Embassy.Rails.RedisStreamListener, listener_opts}]
 
       _ ->
         []

@@ -5,20 +5,19 @@ feature surface. Ordered by real-world impact.
 
 ## High impact
 
-### Multi-node broadcast uses local_broadcast
+### Multi-node broadcast uses local_broadcast for the HTTP source
 
-`Embassy.Rails.Broadcast.dispatch/3` calls `Phoenix.PubSub.local_broadcast/3`,
-which only delivers to WebSocket handlers on the current BEAM node. In a
-multi-node deployment a broadcast arriving at node A over HTTP or Redis will
-not reach connections on node B.
+`Embassy.Rails.Broadcast.dispatch/4` takes a scope. The `:redisx` source
+dispatches with `:cluster` (`Phoenix.PubSub.broadcast/3`), because each
+stream entry is read by one node. The `:redis` source keeps `:local`, which
+is correct: every node subscribes to the Pub/Sub channel. The `:http` source
+also uses `:local`, so a broadcast posted to node A over HTTP will not reach
+connections on node B unless Rails posts to every node.
 
-Fix: replace with `Phoenix.PubSub.broadcast/3`. The reason `local_broadcast`
-was used in v0.1 is that it avoids a double-delivery race if all nodes share
-the same Redis source — but the correct solution is to use a PubSub adapter
-that is not Redis (e.g. `Phoenix.PubSub` with the default PG2 adapter) for
-intra-cluster fan-out, while Redis is only used for the inbound broadcast
-source. Using `broadcast/3` unconditionally is the right call once multi-node
-is in scope.
+Fix: dispatch the `:http` source with `:cluster` scope when Rails posts to a
+single load-balanced endpoint (one node receives each broadcast). Keep
+`:local` when Rails posts to every node. This likely wants a per-instance
+option, since embassy_rails cannot tell which topology it is in.
 
 ## Medium impact
 

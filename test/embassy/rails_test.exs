@@ -142,5 +142,27 @@ defmodule Embassy.RailsTest do
     test "passes for the :http source regardless of redix" do
       assert Embassy.Rails.validate_broadcast!([source: :http, key: "k"], false) == :ok
     end
+
+    test "raises when source is :redisx but redix is unavailable" do
+      message =
+        "Embassy.Rails: broadcast source :redisx requires the :redix dependency; " <>
+          "add {:redix, \"~> 1.0\"} to your deps"
+
+      assert_raise ArgumentError, message, fn ->
+        Embassy.Rails.validate_broadcast!([source: :redisx, redis: "redis://x"], false)
+      end
+    end
+
+    test "passes when source is :redisx and redix is available" do
+      assert Embassy.Rails.validate_broadcast!([source: :redisx, redis: "redis://x"], true) == :ok
+    end
+
+    test "raises when a Redis source has no :redis option" do
+      for source <- [:redis, :redisx] do
+        assert_raise ArgumentError, ~r/:redis/, fn ->
+          Embassy.Rails.validate_broadcast!([source: source], true)
+        end
+      end
+    end
   end
 end

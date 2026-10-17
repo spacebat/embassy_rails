@@ -165,6 +165,23 @@ defmodule Embassy.Rails.RedisStreamListenerIntegrationTest do
     assert_receive {:cable_broadcast, "rc", %{data: "after"}}, 3_000
   end
 
+  test "an Embassy.Rails instance with source :redisx delivers broadcasts", ctx do
+    start_supervised!(
+      {Embassy.Rails,
+       name: __MODULE__.RedisxInstance,
+       embassy: __MODULE__.Embassy,
+       pubsub: __MODULE__.PubSub,
+       rpc: [transport: {:http, "http://example.test"}, secret: "shh"],
+       broadcast: [source: :redisx, redis: ctx.url, stream: ctx.stream, block_ms: 100]}
+    )
+
+    assert_receive {:redisx, :connected, _, %{instance: __MODULE__.RedisxInstance}}, 1_000
+    Phoenix.PubSub.subscribe(__MODULE__.PubSub, Broadcast.topic("wired"))
+
+    xadd_payload(ctx.redis, ctx.stream, envelope("wired", "up"))
+    assert_receive {:cable_broadcast, "wired", %{data: "up"}}, 1_000
+  end
+
   test "removes its consumer on shutdown", ctx do
     start_listener(ctx, consumer: "c1")
     assert_receive {:redisx, :connected, _, _}, 1_000
