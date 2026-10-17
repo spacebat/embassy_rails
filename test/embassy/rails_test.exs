@@ -73,6 +73,29 @@ defmodule Embassy.RailsTest do
     end
   end
 
+  describe "connection tuning options" do
+    for {key, bad} <- [
+          ping_interval: 0,
+          ping_interval: "3000",
+          max_mailbox: 0,
+          max_mailbox: :infinity,
+          slow_client_ms: -1
+        ] do
+      test "rejects #{key}: #{inspect(bad)}" do
+        opts = valid_opts(Embassy.RailsTest.BadTuning) ++ [{unquote(key), unquote(bad)}]
+
+        assert_raise ArgumentError, ~r/#{unquote(key)}/, fn ->
+          Embassy.Rails.start_link(opts)
+        end
+      end
+    end
+
+    test "accepts ping_interval: :infinity and slow_client_ms: 0" do
+      opts = valid_opts(Embassy.RailsTest.Tuned) ++ [ping_interval: :infinity, slow_client_ms: 0]
+      assert {:ok, _} = start_supervised({Embassy.Rails, opts})
+    end
+  end
+
   test "multiple named instances coexist" do
     {:ok, _a} = start_supervised({Embassy.Rails, valid_opts(Embassy.RailsTest.A)}, id: :rails_a)
     {:ok, _b} = start_supervised({Embassy.Rails, valid_opts(Embassy.RailsTest.B)}, id: :rails_b)

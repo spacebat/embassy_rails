@@ -99,16 +99,26 @@ defmodule Embassy.Rails.Connection do
 
   def handle_info({:cable_broadcast, stream, payload}, state) do
     {:message_queue_len, queued} = Process.info(self(), :message_queue_len)
+    tuning = Config.tuning(state.instance)
 
-    if queued > Config.snapshot(state.instance).max_mailbox do
-      Logger.warning("Embassy.Rails.Connection: slow client, #{queued} queued; disconnecting")
-
-      frame =
-        {:text, Jason.encode!(%{type: "disconnect", reason: "slow_client", reconnect: true})}
-
-      {:stop, :normal, {1008, "slow_client"}, [frame], state}
+    if queued <= tuning.max_mailbox do
+      push_broadcast(stream, payload, %{state | slow_since: nil})
     else
-      push_broadcast(stream, payload, state)
+      # Over the cap: disconnect only once it has stayed over for
+      # slow_client_ms, so a burst that drains is still delivered.
+      now = System.monotonic_time(:millisecond)
+      since = state.slow_since || now
+
+      if now - since >= tuning.slow_client_ms do
+        Logger.warning("Embassy.Rails.Connection: slow client, #{queued} queued; disconnecting")
+
+        frame =
+          {:text, Jason.encode!(%{type: "disconnect", reason: "slow_client", reconnect: true})}
+
+        {:stop, :normal, {1008, "slow_client"}, [frame], state}
+      else
+        push_broadcast(stream, payload, %{state | slow_since: since})
+      end
     end
   end
 
@@ -195,7 +205,7 @@ defmodule Embassy.Rails.Connection do
   end
 
   defp schedule_ping(state) do
-    case Config.snapshot(state.instance).ping_interval do
+    case Config.tuning(state.instance).ping_interval do
       :infinity -> :ok
       interval -> Process.send_after(self(), :ping, interval)
     end

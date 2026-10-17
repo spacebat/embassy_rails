@@ -33,7 +33,8 @@ defmodule Embassy.Rails.ConnectionTest do
       cstate: %{},
       istate: %{},
       streams: %{},
-      presence_streams: %{}
+      presence_streams: %{},
+      slow_since: nil
     }
 
     {:ok, bypass: bypass, state: initial_state}
@@ -647,6 +648,14 @@ defmodule Embassy.Rails.ConnectionTest do
   end
 
   describe "drain, ping interval and mailbox cap" do
+    defp flush_filler do
+      receive do
+        :filler -> flush_filler()
+      after
+        0 -> :ok
+      end
+    end
+
     defp start_tuned_instance(name, extra) do
       start_supervised!(
         {Embassy.Rails,
@@ -702,7 +711,7 @@ defmodule Embassy.Rails.ConnectionTest do
     end
 
     test "a slow client over max_mailbox is disconnected", %{state: state} do
-      instance = start_tuned_instance(__MODULE__.SmallMailbox, max_mailbox: 3)
+      instance = start_tuned_instance(__MODULE__.SmallMailbox, max_mailbox: 3, slow_client_ms: 0)
       state = %{state | instance: instance, streams: %{"s" => "id"}}
 
       for _ <- 1..5, do: send(self(), :filler)
@@ -711,6 +720,54 @@ defmodule Embassy.Rails.ConnectionTest do
                Connection.handle_info({:cable_broadcast, "s", %{data: "x"}}, state)
 
       assert Jason.decode!(frame)["reason"] == "slow_client"
+    end
+
+    test "a burst over max_mailbox is delivered while within slow_client_ms", %{state: state} do
+      instance = start_tuned_instance(__MODULE__.Burst, max_mailbox: 3, slow_client_ms: 5_000)
+      state = %{state | instance: instance, streams: %{"s" => "id"}}
+
+      for _ <- 1..5, do: send(self(), :filler)
+
+      assert {:push, {:text, _}, state} =
+               Connection.handle_info({:cable_broadcast, "s", %{data: "x"}}, state)
+
+      assert {:push, {:text, _}, _} =
+               Connection.handle_info({:cable_broadcast, "s", %{data: "y"}}, state)
+    end
+
+    test "a client over max_mailbox for longer than slow_client_ms is disconnected",
+         %{state: state} do
+      instance = start_tuned_instance(__MODULE__.Stuck, max_mailbox: 3, slow_client_ms: 20)
+      state = %{state | instance: instance, streams: %{"s" => "id"}}
+
+      for _ <- 1..5, do: send(self(), :filler)
+
+      assert {:push, {:text, _}, state} =
+               Connection.handle_info({:cable_broadcast, "s", %{data: "x"}}, state)
+
+      Process.sleep(30)
+
+      assert {:stop, :normal, {1008, "slow_client"}, _, _} =
+               Connection.handle_info({:cable_broadcast, "s", %{data: "y"}}, state)
+    end
+
+    test "dropping under max_mailbox resets the slow_client_ms clock", %{state: state} do
+      instance = start_tuned_instance(__MODULE__.Recover, max_mailbox: 3, slow_client_ms: 20)
+      state = %{state | instance: instance, streams: %{"s" => "id"}}
+
+      for _ <- 1..5, do: send(self(), :filler)
+
+      assert {:push, _, state} =
+               Connection.handle_info({:cable_broadcast, "s", %{data: "x"}}, state)
+
+      flush_filler()
+      Process.sleep(30)
+
+      assert {:push, _, state} =
+               Connection.handle_info({:cable_broadcast, "s", %{data: "y"}}, state)
+
+      for _ <- 1..5, do: send(self(), :filler)
+      assert {:push, _, _} = Connection.handle_info({:cable_broadcast, "s", %{data: "z"}}, state)
     end
 
     test "a client under max_mailbox gets the broadcast", %{state: state} do

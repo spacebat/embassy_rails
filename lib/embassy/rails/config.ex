@@ -30,8 +30,16 @@ defmodule Embassy.Rails.Config do
             broadcast: keyword(),
             presence:
               %{ttl_ms: pos_integer(), api_secret: binary() | nil, upstream: binary() | nil}
-              | nil
+              | nil,
+            headers: [binary()],
+            tuning: tuning()
           }
+
+  @type tuning :: %{
+          ping_interval: pos_integer() | :infinity,
+          max_mailbox: pos_integer(),
+          slow_client_ms: non_neg_integer()
+        }
 
   @doc """
   Return the config snapshot for the named Embassy.Rails instance.
@@ -43,6 +51,22 @@ defmodule Embassy.Rails.Config do
   def snapshot(name) when is_atom(name) do
     case Registry.meta(Embassy.Rails.registry_name(name), :config) do
       {:ok, snapshot} -> snapshot
+      :error -> raise Embassy.Rails.NotStartedError, name: name
+    end
+  rescue
+    ArgumentError -> reraise Embassy.Rails.NotStartedError, [name: name], __STACKTRACE__
+  end
+
+  @doc """
+  Return the connection tuning (`:ping_interval`, `:max_mailbox`,
+  `:slow_client_ms`) for the named instance. It is stored apart from the
+  snapshot, so the per-broadcast check copies three values, not the whole
+  snapshot.
+  """
+  @spec tuning(atom()) :: tuning()
+  def tuning(name) when is_atom(name) do
+    case Registry.meta(Embassy.Rails.registry_name(name), :tuning) do
+      {:ok, tuning} -> tuning
       :error -> raise Embassy.Rails.NotStartedError, name: name
     end
   rescue

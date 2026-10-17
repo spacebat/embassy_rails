@@ -36,9 +36,12 @@ defmodule Embassy.Rails do
 
     * `:ping_interval` — ms between server pings (default `3_000`), or
       `:infinity` to disable them and rely on the proxy or client.
-    * `:max_mailbox` — a connection whose mailbox holds more messages than
-      this when a broadcast arrives is disconnected as a slow client
-      (default `1_000`).
+    * `:max_mailbox` — a connection whose mailbox has held more messages
+      than this for `:slow_client_ms` when a broadcast arrives is
+      disconnected as a slow client (default `1_000`).
+    * `:slow_client_ms` — how long a mailbox may stay over `:max_mailbox`
+      before the client is disconnected, so a burst that drains is not
+      cut off (default `5_000`; `0` disconnects at once).
     * `:headers` — list of extra request header names forwarded to the RPC
       `Env` (case-insensitive), added to the defaults
       `cookie`, `user-agent`, `origin`, `x-forwarded-for`, `x-real-ip`.
@@ -98,6 +101,7 @@ defmodule Embassy.Rails do
     validate_broadcast!(broadcast, Code.ensure_loaded?(Redix.PubSub))
     validate_rpc!(rpc, Code.ensure_loaded?(GRPC.Stub))
     normalize_presence!(Keyword.get(opts, :presence, []))
+    normalize_tuning!(opts)
     # Validate the parent Embassy instance is running in the caller's
     # process so that Embassy.NotStartedError is raised synchronously
     # (making assert_raise work in tests, and giving a clean error in
@@ -143,6 +147,8 @@ defmodule Embassy.Rails do
     # Raises Embassy.NotStartedError if the parent isn't up first.
     parent = Embassy.Config.snapshot(embassy)
 
+    tuning = normalize_tuning!(opts)
+
     snapshot = %{
       name: name,
       embassy: embassy,
@@ -152,13 +158,13 @@ defmodule Embassy.Rails do
       broadcast: broadcast,
       presence: normalize_presence!(Keyword.get(opts, :presence, [])),
       headers: forwarded_headers(Keyword.get(opts, :headers, [])),
-      ping_interval: Keyword.get(opts, :ping_interval, 3_000),
-      max_mailbox: Keyword.get(opts, :max_mailbox, 1_000)
+      tuning: tuning
     }
 
     children =
       [
-        {Registry, keys: :unique, name: registry_name(name), meta: [config: snapshot]},
+        {Registry,
+         keys: :unique, name: registry_name(name), meta: [config: snapshot, tuning: tuning]},
         {Registry, keys: :duplicate, name: connections_name(name)}
       ] ++
         rpc_children(name, rpc) ++
@@ -197,6 +203,40 @@ defmodule Embassy.Rails do
         :ok
     end
   end
+
+  @tuning_defaults [ping_interval: 3_000, max_mailbox: 1_000, slow_client_ms: 5_000]
+
+  @doc false
+  @spec normalize_tuning!(keyword()) :: %{
+          ping_interval: pos_integer() | :infinity,
+          max_mailbox: pos_integer(),
+          slow_client_ms: non_neg_integer()
+        }
+  def normalize_tuning!(opts) do
+    tuning =
+      Map.new(@tuning_defaults, fn {key, default} -> {key, Keyword.get(opts, key, default)} end)
+
+    unless tuning.ping_interval == :infinity or pos_integer?(tuning.ping_interval) do
+      raise ArgumentError,
+            "Embassy.Rails: :ping_interval must be a positive integer or :infinity, " <>
+              "got #{inspect(tuning.ping_interval)}"
+    end
+
+    unless pos_integer?(tuning.max_mailbox) do
+      raise ArgumentError,
+            "Embassy.Rails: :max_mailbox must be a positive integer, got #{inspect(tuning.max_mailbox)}"
+    end
+
+    unless is_integer(tuning.slow_client_ms) and tuning.slow_client_ms >= 0 do
+      raise ArgumentError,
+            "Embassy.Rails: :slow_client_ms must be a non-negative integer, " <>
+              "got #{inspect(tuning.slow_client_ms)}"
+    end
+
+    tuning
+  end
+
+  defp pos_integer?(value), do: is_integer(value) and value > 0
 
   @default_headers ~w(cookie user-agent origin x-forwarded-for x-real-ip)
 

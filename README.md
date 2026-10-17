@@ -182,8 +182,10 @@ definitions for a reporter.
   batches with a reconnecting `server_restart` disconnect on shutdown. Keep
   the window inside `terminationGracePeriodSeconds`.
 - `Embassy.Rails.Health.ready?/1` for the readiness probe (not liveness).
-- `ping_interval:` and `max_mailbox:` instance options tune pings and the
-  slow-client cutoff.
+- `ping_interval:`, `max_mailbox:` and `slow_client_ms:` instance options
+  tune pings and the slow-client cutoff: a connection is closed with
+  `slow_client` once its mailbox has stayed over `max_mailbox` for
+  `slow_client_ms` (default 5s), so a burst that drains is still delivered.
 
 ## Composition with `embassy`
 

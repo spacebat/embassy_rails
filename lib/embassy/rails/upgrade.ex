@@ -78,7 +78,8 @@ defmodule Embassy.Rails.Upgrade do
       cstate: %{},
       istate: %{},
       streams: %{},
-      presence_streams: %{}
+      presence_streams: %{},
+      slow_since: nil
     }
 
     conn
