@@ -11,6 +11,10 @@ defmodule Embassy.Rails.Config do
   (URL or opts) and optionally `:channel`; for `:redisx` it carries
   `:redis` and optionally `:stream`, `:group`, `:block_ms` and
   `:consumer`.
+
+  The `:presence` key is `nil` when presence is disabled
+  (`presence: false`), and otherwise
+  `%{ttl_ms: pos_integer, api_secret: binary | nil, upstream: binary | nil}`.
   """
 
   @typedoc """
@@ -23,7 +27,10 @@ defmodule Embassy.Rails.Config do
             finch: atom(),
             pubsub: atom(),
             rpc: keyword(),
-            broadcast: keyword()
+            broadcast: keyword(),
+            presence:
+              %{ttl_ms: pos_integer(), api_secret: binary() | nil, upstream: binary() | nil}
+              | nil
           }
 
   @doc """

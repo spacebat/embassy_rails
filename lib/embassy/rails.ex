@@ -79,6 +79,7 @@ defmodule Embassy.Rails do
     broadcast = fetch_required!(opts, :broadcast)
     validate_broadcast!(broadcast, Code.ensure_loaded?(Redix.PubSub))
     validate_rpc!(rpc, Code.ensure_loaded?(GRPC.Stub))
+    normalize_presence!(Keyword.get(opts, :presence, []))
     # Validate the parent Embassy instance is running in the caller's
     # process so that Embassy.NotStartedError is raised synchronously
     # (making assert_raise work in tests, and giving a clean error in
@@ -124,12 +125,14 @@ defmodule Embassy.Rails do
       finch: parent.finch,
       pubsub: pubsub,
       rpc: rpc,
-      broadcast: broadcast
+      broadcast: broadcast,
+      presence: normalize_presence!(Keyword.get(opts, :presence, []))
     }
 
     children =
       [{Registry, keys: :unique, name: registry_name(name), meta: [config: snapshot]}] ++
         rpc_children(name, rpc) ++
+        presence_children(name, pubsub, snapshot.presence) ++
         broadcast_children(name, broadcast)
 
     Supervisor.init(children, strategy: :one_for_one)
@@ -163,6 +166,56 @@ defmodule Embassy.Rails do
       _ ->
         :ok
     end
+  end
+
+  @presence_defaults [ttl_ms: 60_000, api_secret: nil, upstream: nil]
+
+  @doc false
+  @spec normalize_presence!(keyword() | false) ::
+          %{ttl_ms: pos_integer(), api_secret: binary() | nil, upstream: binary() | nil} | nil
+  def normalize_presence!(false), do: nil
+
+  def normalize_presence!(opts) when is_list(opts) do
+    case Keyword.keys(opts) -- Keyword.keys(@presence_defaults) do
+      [] ->
+        :ok
+
+      unknown ->
+        raise ArgumentError,
+              "Embassy.Rails: unknown :presence option(s) #{inspect(unknown)}; " <>
+                "expected #{inspect(Keyword.keys(@presence_defaults))}"
+    end
+
+    presence = Map.new(Keyword.merge(@presence_defaults, opts))
+
+    unless is_integer(presence.ttl_ms) and presence.ttl_ms > 0 do
+      raise ArgumentError,
+            "Embassy.Rails: :presence :ttl_ms must be a positive integer, got #{inspect(presence.ttl_ms)}"
+    end
+
+    for key <- [:api_secret, :upstream],
+        not (is_nil(presence[key]) or is_binary(presence[key])) do
+      raise ArgumentError,
+            "Embassy.Rails: :presence #{inspect(key)} must be a string or nil, " <>
+              "got #{inspect(presence[key])}"
+    end
+
+    presence
+  end
+
+  def normalize_presence!(other) do
+    raise ArgumentError,
+          "Embassy.Rails: :presence must be a keyword list or false, got #{inspect(other)}"
+  end
+
+  defp presence_children(_name, _pubsub, nil), do: []
+
+  defp presence_children(name, pubsub, presence) do
+    [
+      {Embassy.Rails.PresenceTracker,
+       instance: name, pubsub: pubsub, name: Embassy.Rails.Presence.tracker_name(name)},
+      {Embassy.Rails.Presence, instance: name, ttl_ms: presence.ttl_ms}
+    ]
   end
 
   @doc false
