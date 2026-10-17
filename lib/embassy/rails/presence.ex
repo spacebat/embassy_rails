@@ -22,6 +22,8 @@ defmodule Embassy.Rails.Presence do
 
   alias Embassy.Rails.Config
 
+  require Logger
+
   @doc false
   def tracker_name(instance), do: Module.concat(instance, PresenceTracker)
 
@@ -41,25 +43,42 @@ defmodule Embassy.Rails.Presence do
   A session's presence id on a stream is fixed: joining again with the same
   id updates its info, and with a different id returns
   `{:error, :id_mismatch}` (as anycable-go does).
+
+  Returns `{:error, :unavailable}` rather than exiting the caller when the
+  server is down or does not answer in time, so a presence hiccup never
+  takes a WebSocket down.
   """
   @spec join(atom(), String.t(), String.t(), String.t(), term()) ::
-          :ok | {:error, :id_mismatch | :disabled}
+          :ok | {:error, :id_mismatch | :disabled | :unavailable}
   def join(instance, stream, sid, id, info) do
     if enabled?(instance) do
-      GenServer.call(server_name(instance), {:join, self(), stream, sid, id, info})
+      safe_call(instance, {:join, self(), stream, sid, id, info})
     else
       {:error, :disabled}
     end
   end
 
-  @doc "Remove session `sid` from `stream` at once. A no-op when it is not present."
+  @doc """
+  Remove session `sid` from `stream` at once. A no-op when it is not
+  present. If the server is down the entry is already gone, or expires
+  with the session's monitor, so this still returns `:ok`.
+  """
   @spec leave(atom(), String.t(), String.t()) :: :ok
   def leave(instance, stream, sid) do
     if enabled?(instance) do
-      GenServer.call(server_name(instance), {:leave, stream, sid})
+      _ = safe_call(instance, {:leave, stream, sid})
+      :ok
     else
       :ok
     end
+  end
+
+  defp safe_call(instance, request) do
+    GenServer.call(server_name(instance), request)
+  catch
+    :exit, reason ->
+      Logger.warning("Embassy.Rails.Presence: server unavailable: #{inspect(reason)}")
+      {:error, :unavailable}
   end
 
   @doc """

@@ -131,6 +131,32 @@ defmodule Embassy.Rails.PresenceTest do
     assert_receive {:cable_presence, "room", %{"type" => "join", "id" => "u3"}}
   end
 
+  test "a session can rejoin after the tracker shard crashes", %{instance: instance} do
+    :ok = Presence.join(instance, "room", "sid1", "u1", nil)
+    server = Process.whereis(Presence.server_name(instance))
+
+    instance
+    |> Presence.tracker_name()
+    |> Phoenix.Tracker.Shard.name_for_number(0)
+    |> Process.whereis()
+    |> Process.exit(:kill)
+
+    wait_for(fn ->
+      pid = Process.whereis(Presence.server_name(instance))
+      pid && pid != server
+    end)
+
+    assert :ok = Presence.join(instance, "room", "sid1", "u1", nil)
+    assert {:ok, %{"total" => 1}} = Presence.info(instance, "room", false)
+  end
+
+  test "join and leave do not exit the caller while the server is down", %{instance: instance} do
+    :ok = Supervisor.terminate_child(instance, Presence)
+
+    assert {:error, :unavailable} = Presence.join(instance, "room", "sid1", "u1", nil)
+    assert :ok = Presence.leave(instance, "room", "sid1")
+  end
+
   defp wait_for(fun, tries \\ 50) do
     cond do
       fun.() -> :ok
