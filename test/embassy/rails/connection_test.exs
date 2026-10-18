@@ -696,6 +696,31 @@ defmodule Embassy.Rails.ConnectionTest do
              )
     end
 
+    test "a connection that registers once draining has begun drains itself",
+         %{bypass: bypass, state: state} do
+      instance = __MODULE__.LateDrain
+
+      start_supervised!(
+        {Embassy.Rails,
+         name: instance,
+         embassy: Embassy.Rails.ConnectionTest.Embassy,
+         pubsub: Embassy.Rails.ConnectionTest.PubSub,
+         rpc: [transport: {:http, "http://localhost:#{bypass.port}"}, secret: "shh"],
+         broadcast: [source: :http, key: "bcast"]},
+        id: instance
+      )
+
+      start_supervised!({Embassy.Rails.Drain, instance: instance, window_ms: 10, batches: 1})
+      stop_supervised!({Embassy.Rails.Drain, instance})
+
+      Bypass.expect_once(bypass, "POST", "/_anycable/connect", fn conn ->
+        Plug.Conn.resp(conn, 200, ~s({"status":1,"identifiers":"abc","transmissions":[]}))
+      end)
+
+      assert {:push, _, _} = Connection.init(%{state | instance: instance})
+      assert_received :embassy_rails_drain
+    end
+
     test "ping uses the instance's ping_interval", %{state: state} do
       instance = start_tuned_instance(__MODULE__.FastPing, ping_interval: 20)
 

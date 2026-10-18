@@ -32,7 +32,7 @@ defmodule Embassy.Rails.Connection do
 
   @behaviour WebSock
 
-  alias Embassy.Rails.{Broadcast, Config, Presence, RPC}
+  alias Embassy.Rails.{Broadcast, Config, Drain, Presence, RPC}
 
   require Logger
 
@@ -49,6 +49,11 @@ defmodule Embassy.Rails.Connection do
         )
 
         Registry.register(Embassy.Rails.connections_name(state.instance), :conn, nil)
+
+        # The upgrade checked draining before the connect RPC, which can take
+        # longer than Drain watches for late registrations.
+        if Drain.draining?(state.instance), do: send(self(), :embassy_rails_drain)
+
         schedule_ping(state)
         {:push, connect_frames(resp["transmissions"] || []), state}
 
