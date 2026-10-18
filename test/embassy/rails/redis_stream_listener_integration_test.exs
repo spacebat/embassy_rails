@@ -352,4 +352,30 @@ defmodule Embassy.Rails.RedisStreamListenerIntegrationTest do
     refute_receive {:redisx, :connected, _, _}, 300
     assert Process.alive?(pid)
   end
+
+  # An entry dispatched whose XACK failed stays pending; DELCONSUMER would
+  # drop it from the group, where nothing could reclaim it.
+  test "a drained listener keeps its consumer while it has pending entries", ctx do
+    Redix.command!(ctx.redis, ["XGROUP", "CREATE", ctx.stream, "bx", "$", "MKSTREAM"])
+    xadd_payload(ctx.redis, ctx.stream, envelope("pending", "x"))
+
+    Redix.command!(ctx.redis, [
+      "XREADGROUP",
+      "GROUP",
+      "bx",
+      "c1",
+      "COUNT",
+      "1",
+      "STREAMS",
+      ctx.stream,
+      ">"
+    ])
+
+    drain(ctx.instance)
+    pid = start_listener(ctx, consumer: "c1")
+    eventually(fn -> :sys.get_state(pid).status == :stopped end)
+
+    assert consumer?(ctx, "c1")
+    assert [1 | _] = Redix.command!(ctx.redis, ["XPENDING", ctx.stream, "bx"])
+  end
 end

@@ -35,8 +35,10 @@ defmodule Embassy.Rails.RedisStreamListener do
   disconnected from its peers, and any entry it read after that would
   reach only its own clients. The read in flight when draining begins
   still returns, and its entries are dispatched and acked; every entry is
-  acked before the next read, so nothing is pending when `DELCONSUMER`
-  runs (it discards a consumer's pending entries).
+  acked before the next read, so normally nothing is pending when
+  `DELCONSUMER` runs. `DELCONSUMER` discards a consumer's pending entries,
+  so if an ack failed and entries are still pending, the consumer is kept
+  and the other consumers reclaim them.
 
   Each entry reaches exactly one consumer in the group, so this source
   dispatches with `:cluster` scope. A multi-node deployment therefore
@@ -195,8 +197,35 @@ defmodule Embassy.Rails.RedisStreamListener do
 
   # Bounded so a shutdown, which may first wait out a blocked read, stays
   # within the child spec's budget.
+  #
+  # DELCONSUMER drops the consumer's pending entries from the group, where
+  # XAUTOCLAIM can no longer reach them. Entries are acked before the next
+  # read, but an ack that failed leaves some pending: keep the consumer
+  # then, and the other consumers reclaim them once idle.
   defp remove_consumer(state) do
-    command(state, ["XGROUP", "DELCONSUMER", state.stream, state.group, state.consumer], 3_000)
+    case command(
+           state,
+           ["XPENDING", state.stream, state.group, "-", "+", "1", state.consumer],
+           3_000
+         ) do
+      {:ok, []} ->
+        command(
+          state,
+          ["XGROUP", "DELCONSUMER", state.stream, state.group, state.consumer],
+          3_000
+        )
+
+      {:ok, [_ | _]} ->
+        Logger.warning(
+          "Embassy.Rails.RedisStreamListener: keeping consumer #{state.consumer}, " <>
+            "it has pending entries for the other consumers to reclaim"
+        )
+
+        {:ok, :kept}
+
+      {:error, _} = error ->
+        error
+    end
   end
 
   defp stop_redix(state) do
