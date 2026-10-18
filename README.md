@@ -200,7 +200,7 @@ the same Rails backend via `Embassy.ReverseProxy` on a different route.
 
 ## Status
 
-v0.2.0. Published to the local `spacebat` Hex registry (not public hex.pm).
+v0.3.0. Published to the local `spacebat` Hex registry (not public hex.pm).
 See `RELEASING.md` for the publish process.
 
 ## License
