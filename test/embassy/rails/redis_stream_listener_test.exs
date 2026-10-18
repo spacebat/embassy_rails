@@ -38,7 +38,9 @@ defmodule Embassy.Rails.RedisStreamListenerTest do
         block_ms: 10_000
       )
 
-    assert spec.shutdown > 10_000
+    # The read, then XGROUP CREATE, XAUTOCLAIM, two acks, XPENDING and
+    # DELCONSUMER at 2 s each.
+    assert spec.shutdown > 10_000 + 1_000 + 6 * 2_000
 
     assert Embassy.Rails.RedisStreamListener.child_spec(instance: :i, redis: "redis://x").shutdown >
              2_000

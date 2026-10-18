@@ -68,8 +68,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   draining begins, dispatches and acks what it already read, and removes its
   consumer from the group, unless it still has pending entries (an ack
   that failed): `DELCONSUMER` would orphan those, so the consumer is kept
-  for the other consumers to reclaim them. Its `XGROUP DELCONSUMER` on
-  shutdown is bounded so it stays within the child spec's shutdown.
+  for the other consumers to reclaim them. Every Redis command but the
+  blocking read now times out at 2 s, and the child spec's shutdown covers
+  a whole poll plus the consumer removal (`block_ms + 14_000`), so the
+  removal is not cut off by the supervisor.
 - The gRPC readiness probe misread `ipv4:`, `ipv6:`, `dns://authority/`
   and comma-list targets, and could not reach an IPv6 address; it now
   probes the first address of any gRPC target form.

@@ -94,12 +94,18 @@ defmodule Embassy.Rails.RedisStreamListener do
   @max_backoff_ms 30_000
   @gate_retry_ms 500
 
+  # Redis timeout for every command but the blocking read.
+  @command_timeout 2_000
+
   @doc false
-  # A shutdown waits for a blocked XREADGROUP to return before terminate/2
-  # can remove the consumer, so it must outlast the block.
+  # A shutdown first waits for the poll in progress: XGROUP CREATE,
+  # XAUTOCLAIM and its ack, the blocked XREADGROUP (timing out at
+  # block_ms + 1000) and its ack. terminate/2 then runs XPENDING and
+  # DELCONSUMER. The budget covers all of it with a second to spare.
   def child_spec(opts) do
     block_ms = Keyword.get(opts, :block_ms) || @default_block_ms
-    Map.put(super(opts), :shutdown, block_ms + 5_000)
+    shutdown = block_ms + 1_000 + 6 * @command_timeout + 1_000
+    Map.put(super(opts), :shutdown, shutdown)
   end
 
   @doc false
@@ -205,15 +211,10 @@ defmodule Embassy.Rails.RedisStreamListener do
   defp remove_consumer(state) do
     case command(
            state,
-           ["XPENDING", state.stream, state.group, "-", "+", "1", state.consumer],
-           3_000
+           ["XPENDING", state.stream, state.group, "-", "+", "1", state.consumer]
          ) do
       {:ok, []} ->
-        command(
-          state,
-          ["XGROUP", "DELCONSUMER", state.stream, state.group, state.consumer],
-          3_000
-        )
+        command(state, ["XGROUP", "DELCONSUMER", state.stream, state.group, state.consumer])
 
       {:ok, [_ | _]} ->
         Logger.warning(
@@ -367,7 +368,7 @@ defmodule Embassy.Rails.RedisStreamListener do
       ["XDEL", state.stream | ids]
     ]
 
-    case run(state, fn -> Redix.pipeline(state.conn, pipeline) end) do
+    case run(state, fn -> Redix.pipeline(state.conn, pipeline, timeout: @command_timeout) end) do
       {:ok, _} -> {:ok, state}
       {:error, error} -> {:error, error, state}
     end
@@ -458,7 +459,7 @@ defmodule Embassy.Rails.RedisStreamListener do
   defp start_redix(redis) when is_binary(redis), do: Redix.start_link(redis)
   defp start_redix(redis) when is_list(redis), do: Redix.start_link(redis)
 
-  defp command(state, cmd, timeout \\ 5_000) do
+  defp command(state, cmd, timeout \\ @command_timeout) do
     run(state, fn -> Redix.command(state.conn, cmd, timeout: timeout) end)
   end
 
