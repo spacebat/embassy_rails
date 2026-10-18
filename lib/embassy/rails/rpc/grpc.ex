@@ -121,21 +121,31 @@ if Code.ensure_loaded?(GRPC.Stub) do
 
     defp maybe_reconnect(ok, _instance, _channel), do: ok
 
-    defp do_call(channel, :connect, request, opts) do
+    # The stub calls the Mint connection process directly: a dead or hung
+    # one exits the caller, and would take the WebSocket down with it.
+    # Report it as an error so the caller can reply and the channel is
+    # replaced.
+    defp do_call(channel, op, request, opts) do
+      stub_call(channel, op, request, opts)
+    catch
+      :exit, reason -> {:error, {:grpc, {:exit, reason}}}
+    end
+
+    defp stub_call(channel, :connect, request, opts) do
       case AnycableStub.connect(channel, request, opts) do
         {:ok, resp} -> {:ok, normalize_connect(resp)}
         {:error, reason} -> {:error, grpc_error(reason)}
       end
     end
 
-    defp do_call(channel, :command, request, opts) do
+    defp stub_call(channel, :command, request, opts) do
       case AnycableStub.command(channel, request, opts) do
         {:ok, resp} -> {:ok, normalize_command(resp)}
         {:error, reason} -> {:error, grpc_error(reason)}
       end
     end
 
-    defp do_call(channel, :disconnect, request, opts) do
+    defp stub_call(channel, :disconnect, request, opts) do
       case AnycableStub.disconnect(channel, request, opts) do
         {:ok, resp} -> {:ok, normalize_disconnect(resp)}
         {:error, reason} -> {:error, grpc_error(reason)}

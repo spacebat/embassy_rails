@@ -72,6 +72,7 @@ if Code.ensure_loaded?(GRPC.Stub) do
         endpoint: Keyword.fetch!(opts, :endpoint),
         secret: Keyword.fetch!(opts, :secret),
         channel: nil,
+        monitor: nil,
         retry: nil,
         backoff: @backoff_start
       }
@@ -96,6 +97,11 @@ if Code.ensure_loaded?(GRPC.Stub) do
 
     def handle_info({:reconnect, _stale}, state), do: {:noreply, state}
 
+    # The connection process died. grpc links it to its own connection
+    # process, not to this one, so it is monitored here.
+    def handle_info({:DOWN, ref, :process, _pid, _reason}, %{monitor: ref} = state),
+      do: {:noreply, connect(%{state | monitor: nil})}
+
     def handle_info(_msg, state), do: {:noreply, state}
 
     @impl true
@@ -118,7 +124,7 @@ if Code.ensure_loaded?(GRPC.Stub) do
             endpoint: state.endpoint
           })
 
-          %{state | channel: channel, backoff: @backoff_start}
+          %{state | channel: channel, monitor: monitor(channel), backoff: @backoff_start}
 
         {:error, reason} ->
           Logger.warning(
@@ -134,6 +140,7 @@ if Code.ensure_loaded?(GRPC.Stub) do
     defp close(%{channel: nil} = state), do: state
 
     defp close(%{channel: channel} = state) do
+      if state.monitor, do: Process.demonitor(state.monitor, [:flush])
       Registry.put_meta(Embassy.Rails.registry_name(state.instance), :grpc_channel, nil)
 
       try do
@@ -142,8 +149,13 @@ if Code.ensure_loaded?(GRPC.Stub) do
         :exit, _ -> :ok
       end
 
-      %{state | channel: nil}
+      %{state | channel: nil, monitor: nil}
     end
+
+    defp monitor(%GRPC.Channel{adapter_payload: %{conn_pid: pid}}) when is_pid(pid),
+      do: Process.monitor(pid)
+
+    defp monitor(_channel), do: nil
   end
 else
   defmodule Embassy.Rails.GrpcChannel do

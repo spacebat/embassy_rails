@@ -47,6 +47,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a burst of failed calls opened one connection per call. It now closes
   the old channel, and a reconnect request for a channel that has already
   been replaced is ignored.
+- A gRPC connection process that died (rather than closed) made every RPC
+  call exit the calling WebSocket process, and was never replaced. Calls
+  now return an error, and `GrpcChannel` monitors the connection process
+  and reconnects when it goes down.
 - A connection whose connect RPC completed after draining began was never
   sent the drain message; it now drains itself on registration.
 - A disconnect RPC started while the instance was stopping could crash

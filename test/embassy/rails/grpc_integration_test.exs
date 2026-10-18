@@ -80,7 +80,45 @@ defmodule Embassy.Rails.GrpcIntegrationTest do
     [_host, port] = String.split(endpoint, ":")
     {:ok, _pid, _port} = GRPC.Server.start(GrpcServer.Impl, String.to_integer(port))
 
-    assert Helpers.eventually(fn -> match?({:ok, _}, RPC.connect(instance, env)) end)
+    # Covers several GrpcChannel backoff steps (200, 400, 800 ms).
+    assert Helpers.eventually(fn -> match?({:ok, _}, RPC.connect(instance, env)) end, 250)
+  end
+
+  @tag :capture_log
+  test "a dead connection process fails the call and is replaced", %{instance: instance} do
+    {:ok, %{adapter_payload: %{conn_pid: conn_pid}} = before} =
+      GrpcChannel.fetch_channel(instance)
+
+    # Suspended, the holder cannot replace the channel before the call
+    # hits the dead process.
+    holder = GrpcChannel.whereis(instance)
+    :sys.suspend(holder)
+    Process.exit(conn_pid, :kill)
+
+    env = %{url: "wss://t/", headers: %{}, cstate: %{}, istate: %{}}
+    assert {:error, {:grpc, {:exit, _}}} = RPC.connect(instance, env)
+    :sys.resume(holder)
+
+    assert Helpers.eventually(
+             fn -> match?({:ok, ch} when ch != before, GrpcChannel.fetch_channel(instance)) end,
+             100
+           )
+
+    assert {:ok, _} = RPC.connect(instance, env)
+  end
+
+  @tag :capture_log
+  test "a dead connection process is replaced without waiting for a call",
+       %{instance: instance} do
+    {:ok, %{adapter_payload: %{conn_pid: conn_pid}} = before} =
+      GrpcChannel.fetch_channel(instance)
+
+    Process.exit(conn_pid, :kill)
+
+    assert Helpers.eventually(
+             fn -> match?({:ok, ch} when ch != before, GrpcChannel.fetch_channel(instance)) end,
+             100
+           )
   end
 
   @tag :capture_log
