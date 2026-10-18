@@ -1,8 +1,10 @@
 defmodule Embassy.Rails.Health do
   @moduledoc """
   Readiness for a Kubernetes probe: false while draining
-  (`Embassy.Rails.Drain`) or when the AnyCable RPC is unreachable. Keep it
-  out of liveness: an RPC outage must not restart the pods.
+  (`Embassy.Rails.Drain`), when the AnyCable RPC is unreachable, or, for
+  the `:redis` and `:redisx` broadcast sources, until the listener is
+  subscribed or consuming. Keep it out of liveness: an RPC or Redis outage
+  must not restart the pods.
 
   For the HTTP and UDS transports, any HTTP response to a `HEAD /` counts
   as reachable. For gRPC, the channel must be established and a TCP
@@ -16,7 +18,32 @@ defmodule Embassy.Rails.Health do
 
   @spec ready?(atom()) :: boolean()
   def ready?(instance) do
-    not Drain.draining?(instance) and rpc_reachable?(instance)
+    not Drain.draining?(instance) and source_ok?(instance) and rpc_reachable?(instance)
+  end
+
+  @doc false
+  # Set by the Redis listeners. Lives in the config Registry's meta, so a
+  # Registry restart clears it, and restarts the listener that sets it.
+  @spec put_source_ready(atom(), boolean()) :: :ok
+  def put_source_ready(instance, ready?) do
+    Registry.put_meta(Embassy.Rails.registry_name(instance), :source_ready, ready?)
+  rescue
+    ArgumentError -> :ok
+  end
+
+  @doc false
+  @spec source_ready?(atom()) :: boolean()
+  def source_ready?(instance) do
+    Registry.meta(Embassy.Rails.registry_name(instance), :source_ready) == {:ok, true}
+  rescue
+    ArgumentError -> false
+  end
+
+  defp source_ok?(instance) do
+    case Config.snapshot(instance).broadcast[:source] do
+      source when source in [:redis, :redisx] -> source_ready?(instance)
+      _ -> true
+    end
   end
 
   defp rpc_reachable?(instance) do

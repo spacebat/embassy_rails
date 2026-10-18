@@ -69,7 +69,7 @@ defmodule Embassy.Rails.RedisStreamListener do
   use GenServer
   require Logger
 
-  alias Embassy.Rails.{Broadcast, BroadcastEnvelope}
+  alias Embassy.Rails.{Broadcast, BroadcastEnvelope, Health}
 
   @default_stream "__anycable__"
   @default_group "bx"
@@ -95,6 +95,7 @@ defmodule Embassy.Rails.RedisStreamListener do
     Process.flag(:trap_exit, true)
 
     redis = Keyword.fetch!(opts, :redis)
+    Health.put_source_ready(Keyword.fetch!(opts, :instance), false)
     {:ok, conn} = start_redix(redis)
 
     state = %{
@@ -304,12 +305,14 @@ defmodule Embassy.Rails.RedisStreamListener do
   end
 
   defp connected(%{status: :initial} = state) do
+    Health.put_source_ready(state.instance, true)
     emit(state, :connected, %{}, %{})
     %{state | status: :connected, failures: 0}
   end
 
   defp connected(%{status: :disconnected} = state) do
     Logger.info("Embassy.Rails.RedisStreamListener: reconnected to #{state.stream}")
+    Health.put_source_ready(state.instance, true)
     emit(state, :reconnected, %{}, %{})
     %{state | status: :connected, failures: 0}
   end
@@ -322,6 +325,7 @@ defmodule Embassy.Rails.RedisStreamListener do
 
   defp disconnected(state, reason) do
     Logger.warning("Embassy.Rails.RedisStreamListener: Redis unavailable: #{inspect(reason)}")
+    Health.put_source_ready(state.instance, false)
     emit(state, :disconnected, %{}, %{reason: reason})
     %{state | status: :disconnected, failures: 1}
   end

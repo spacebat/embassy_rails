@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   children that depend on it; before, it took the whole instance down. A
   broadcast listener that keeps crashing now exhausts only its own group's
   restart intensity, and no longer stops the WebSockets.
+- `Embassy.Rails.Health.ready?/1` is also false, for the `:redis` and
+  `:redisx` broadcast sources, until the listener is subscribed or
+  consuming, and while it cannot reach Redis.
 
 ### Added
 

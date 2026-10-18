@@ -15,7 +15,7 @@ defmodule Embassy.Rails.RedisListener do
   use GenServer
   require Logger
 
-  alias Embassy.Rails.{Broadcast, BroadcastEnvelope}
+  alias Embassy.Rails.{Broadcast, BroadcastEnvelope, Health}
 
   @default_channel "__anycable__"
 
@@ -29,6 +29,7 @@ defmodule Embassy.Rails.RedisListener do
     instance = Keyword.fetch!(opts, :instance)
     channel = Keyword.get(opts, :channel) || @default_channel
     redis = Keyword.fetch!(opts, :redis)
+    Health.put_source_ready(instance, false)
 
     {:ok, conn} = Redix.PubSub.start_link(redis)
     {:ok, ref} = Redix.PubSub.subscribe(conn, channel, self())
@@ -60,6 +61,7 @@ defmodule Embassy.Rails.RedisListener do
         %{status: :disconnected} = state
       ) do
     Logger.info("Embassy.Rails.RedisListener: reconnected to #{channel}")
+    Health.put_source_ready(state.instance, true)
 
     :telemetry.execute(
       [:embassy_rails, :broadcast, :redis, :reconnected],
@@ -72,6 +74,7 @@ defmodule Embassy.Rails.RedisListener do
 
   def handle_info({:redix_pubsub, _conn, _ref, :subscribed, %{channel: channel}}, state) do
     Logger.info("Embassy.Rails.RedisListener: subscribed to #{channel}")
+    Health.put_source_ready(state.instance, true)
 
     :telemetry.execute(
       [:embassy_rails, :broadcast, :redis, :connected],
@@ -90,6 +93,7 @@ defmodule Embassy.Rails.RedisListener do
       end
 
     Logger.warning("Embassy.Rails.RedisListener: disconnected from Redis#{suffix}")
+    Health.put_source_ready(state.instance, false)
 
     :telemetry.execute(
       [:embassy_rails, :broadcast, :redis, :disconnected],

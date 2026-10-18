@@ -36,4 +36,26 @@ defmodule Embassy.Rails.HealthTest do
     stop_supervised!({Drain, __MODULE__.I})
     refute Health.ready?(__MODULE__.I)
   end
+
+  describe "with a Redis broadcast source" do
+    for source <- [:redis, :redisx] do
+      @tag :capture_log
+      test "not ready while the #{source} listener cannot reach Redis", %{bypass: bypass} do
+        Bypass.stub(bypass, "HEAD", "/", fn conn -> Plug.Conn.resp(conn, 404, "") end)
+        instance = Module.concat(__MODULE__, unquote(source))
+
+        start_supervised!(
+          {Embassy.Rails,
+           name: instance,
+           embassy: __MODULE__.Embassy,
+           pubsub: __MODULE__.PubSub,
+           rpc: [transport: {:http, "http://localhost:#{bypass.port}"}, secret: "s"],
+           broadcast: [source: unquote(source), redis: "redis://127.0.0.1:1"]},
+          id: instance
+        )
+
+        refute Health.ready?(instance)
+      end
+    end
+  end
 end

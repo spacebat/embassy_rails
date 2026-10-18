@@ -222,4 +222,21 @@ defmodule Embassy.Rails.RedisStreamListenerIntegrationTest do
     consumers = Redix.command!(ctx.redis, ["XINFO", "CONSUMERS", ctx.stream, "bx"])
     refute Enum.any?(consumers, &match?(["name", "c1" | _], &1))
   end
+
+  test "an instance is ready only once its listener is consuming", ctx do
+    bypass = Bypass.open()
+    Bypass.stub(bypass, "HEAD", "/", fn conn -> Plug.Conn.resp(conn, 404, "") end)
+
+    start_supervised!(
+      {Embassy.Rails,
+       name: __MODULE__.ReadyInstance,
+       embassy: __MODULE__.Embassy,
+       pubsub: __MODULE__.PubSub,
+       rpc: [transport: {:http, "http://localhost:#{bypass.port}"}, secret: "shh"],
+       broadcast: [source: :redisx, redis: ctx.url, stream: ctx.stream, block_ms: 100]}
+    )
+
+    assert_receive {:redisx, :connected, _, %{instance: __MODULE__.ReadyInstance}}, 1_000
+    assert Embassy.Rails.Health.ready?(__MODULE__.ReadyInstance)
+  end
 end

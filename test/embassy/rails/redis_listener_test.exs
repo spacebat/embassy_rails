@@ -66,6 +66,60 @@ defmodule Embassy.Rails.RedisListenerTest do
     end
   end
 
+  describe "readiness" do
+    setup do
+      start_supervised!({Finch, name: __MODULE__.ReadyFinch})
+      start_supervised!({Phoenix.PubSub, name: __MODULE__.ReadyPubSub})
+      start_supervised!({Embassy, name: __MODULE__.ReadyEmbassy, finch: __MODULE__.ReadyFinch})
+
+      start_supervised!(
+        {Embassy.Rails,
+         name: __MODULE__.ReadyInstance,
+         embassy: __MODULE__.ReadyEmbassy,
+         pubsub: __MODULE__.ReadyPubSub,
+         rpc: [transport: {:http, "http://example.test"}, secret: "shh"],
+         broadcast: [source: :http, key: "bcast"]}
+      )
+
+      :ok
+    end
+
+    test "the source is ready while subscribed and not after a disconnect" do
+      instance = __MODULE__.ReadyInstance
+
+      state = %{
+        instance: instance,
+        channel: "__anycable__",
+        conn: nil,
+        ref: nil,
+        status: :initial
+      }
+
+      refute Embassy.Rails.Health.source_ready?(instance)
+
+      subscribed = {:redix_pubsub, self(), make_ref(), :subscribed, %{channel: "__anycable__"}}
+      assert {:noreply, state} = RedisListener.handle_info(subscribed, state)
+      assert Embassy.Rails.Health.source_ready?(instance)
+
+      down =
+        {:redix_pubsub, self(), make_ref(), :disconnected,
+         %{error: %Redix.ConnectionError{reason: :closed}}}
+
+      assert {:noreply, _} = RedisListener.handle_info(down, state)
+      refute Embassy.Rails.Health.source_ready?(instance)
+    end
+
+    test "a restarted listener does not inherit its predecessor's readiness" do
+      instance = __MODULE__.ReadyInstance
+      Embassy.Rails.Health.put_source_ready(instance, true)
+
+      assert {:ok, _state} =
+               RedisListener.init(instance: instance, redis: [host: "127.0.0.1", port: 1])
+
+      refute Embassy.Rails.Health.source_ready?(instance)
+    end
+  end
+
   describe "handle_info lifecycle" do
     alias Embassy.Rails.Test.TelemetryCollector
 
