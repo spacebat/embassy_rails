@@ -69,6 +69,14 @@ defmodule Embassy.Rails.RedisStreamListener do
       cluster", so a node does not read entries it cannot pass on. A
       hook that raises counts as false. Default: always true.
 
+      Readiness waits for the listener (`Embassy.Rails.Health`), so a hook
+      that needs peers can keep the first pod of a rollout unready for
+      good: a Kubernetes headless Service lists only Ready pods unless it
+      sets `publishNotReadyAddresses: true`, so DNS-based clustering never
+      finds a peer. Set that on the clustering Service, or write the hook
+      as "joined the cluster, or no peers are expected, or N seconds have
+      passed".
+
   ## Telemetry
 
   Events under `[:embassy_rails, :broadcast, :redisx, _]`, with metadata

@@ -3,8 +3,9 @@ defmodule Embassy.Rails.Health do
   Readiness for a Kubernetes probe: false while draining
   (`Embassy.Rails.Drain`), when the AnyCable RPC is unreachable, or, for
   the `:redis` and `:redisx` broadcast sources, until the listener is
-  subscribed or consuming. Keep it out of liveness: an RPC or Redis outage
-  must not restart the pods.
+  subscribed or consuming (which a `:consume_when` hook can hold off; see
+  `Embassy.Rails.RedisStreamListener`). Keep it out of liveness: an RPC or
+  Redis outage must not restart the pods.
 
   For the HTTP and UDS transports, any HTTP response to a `HEAD /` counts
   as reachable. For gRPC, the channel must be established and a TCP

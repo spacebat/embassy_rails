@@ -12,6 +12,11 @@ defmodule Embassy.Rails.Drain do
   group, so the other nodes read every entry (see
   `Embassy.Rails.RedisStreamListener`).
 
+  Draining is meant to end with the node: a redisx listener that has
+  stopped stays stopped, keeping readiness false, until the
+  `Embassy.Rails` instance itself restarts. A restarted `Drain` clears the
+  flag (upgrades are accepted again) but does not restart the listener.
+
   Start it in your application tree **after** the Endpoint, so that it
   terminates first:
 

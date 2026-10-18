@@ -22,8 +22,7 @@ defmodule Embassy.Rails do
       `:protobuf` deps. Optional `:timeout` (ms, default 5000) bounds
       each RPC call. Optional `:max_disconnects` (default `1_000`) caps
       the disconnect RPCs in flight at once; one over the cap is dropped
-      with a warning, as anycable-go does when its disconnect queue is
-      full.
+      with a warning, and Rails does not see that disconnect.
     * `:broadcast` — keyword. Must include `:source`. For
       `source: :http`: `:key` (bearer token for `POST /_broadcast`).
       For `source: :redis` (AnyCable's Pub/Sub broadcaster): `:redis` (a
@@ -34,7 +33,8 @@ defmodule Embassy.Rails do
       `:group` (`"bx"`), `:block_ms` (`2000`), `:consumer` and
       `:consume_when` (a zero-arity fun or `{m, f, a}`; the listener
       does not join the group until it returns true, for example once
-      the node has joined the cluster); see
+      the node has joined the cluster; it also holds readiness, see its
+      docs before using it with DNS-based clustering); see
       `Embassy.Rails.RedisStreamListener`. Both Redis sources require the
       optional `:redix` dependency.
 
