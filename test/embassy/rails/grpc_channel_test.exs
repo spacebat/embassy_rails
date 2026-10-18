@@ -35,4 +35,17 @@ defmodule Embassy.Rails.GrpcChannelTest do
     assert Process.alive?(pid)
     assert GrpcChannel.fetch_channel(instance) == :error
   end
+
+  # 10.255.255.1 is unrouted: SYNs go unanswered where nothing rejects them.
+  @tag :capture_log
+  test "a connect to an unresponsive address gives up within a few seconds",
+       %{instance: instance} do
+    pid =
+      start_supervised!(
+        {GrpcChannel, instance: instance, endpoint: "10.255.255.1:50051", secret: "shh"}
+      )
+
+    {us, _state} = :timer.tc(fn -> :sys.get_state(pid, 10_000) end)
+    assert div(us, 1000) < 4_000
+  end
 end

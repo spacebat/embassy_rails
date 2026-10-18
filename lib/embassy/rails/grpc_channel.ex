@@ -140,8 +140,13 @@ if Code.ensure_loaded?(GRPC.Stub) do
       if state.replace, do: Process.cancel_timer(state.replace)
       state = close(%{state | replace: nil})
 
+      # Bounded so an endpoint that drops SYNs does not block this process
+      # (and its shutdown) for the default 20 s: the TCP connect gives up
+      # at 2 s, the wait for the channel at 3 s.
       opts = [
         adapter: GRPC.Client.Adapters.Mint,
+        adapter_opts: [transport_opts: [timeout: 2_000]],
+        connect_timeout: 3_000,
         headers: [{"authorization", "Bearer " <> state.secret}]
       ]
 
