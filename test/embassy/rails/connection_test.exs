@@ -747,6 +747,39 @@ defmodule Embassy.Rails.ConnectionTest do
       assert Jason.decode!(frame)["reason"] == "slow_client"
     end
 
+    test "the ping tick disconnects a client stuck over max_mailbox", %{state: state} do
+      instance =
+        start_tuned_instance(__MODULE__.PingSlow,
+          max_mailbox: 3,
+          slow_client_ms: 0,
+          ping_interval: :infinity
+        )
+
+      for _ <- 1..5, do: send(self(), :filler)
+
+      assert {:stop, :normal, {1008, "slow_client"}, [{:text, frame}], _} =
+               Connection.handle_info(:ping, %{state | instance: instance})
+
+      assert Jason.decode!(frame)["reason"] == "slow_client"
+    end
+
+    test "the ping tick starts the slow_client_ms clock without disconnecting",
+         %{state: state} do
+      instance =
+        start_tuned_instance(__MODULE__.PingBurst,
+          max_mailbox: 3,
+          slow_client_ms: 5_000,
+          ping_interval: :infinity
+        )
+
+      for _ <- 1..5, do: send(self(), :filler)
+
+      assert {:push, {:text, _}, %{slow_since: since}} =
+               Connection.handle_info(:ping, %{state | instance: instance})
+
+      assert is_integer(since)
+    end
+
     test "a burst over max_mailbox is delivered while within slow_client_ms", %{state: state} do
       instance = start_tuned_instance(__MODULE__.Burst, max_mailbox: 3, slow_client_ms: 5_000)
       state = %{state | instance: instance, streams: %{"s" => "id"}}

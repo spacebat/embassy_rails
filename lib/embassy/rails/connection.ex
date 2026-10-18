@@ -96,34 +96,19 @@ defmodule Embassy.Rails.Connection do
   end
 
   @impl WebSock
+  # The mailbox is checked on every tick too, not only per broadcast, so a
+  # backlog of other messages is caught as well.
   def handle_info(:ping, state) do
-    frame = {:text, Jason.encode!(%{type: "ping", message: System.system_time(:second)})}
-    schedule_ping(state)
-    {:push, frame, state}
+    with {:ok, state} <- check_mailbox(state) do
+      frame = {:text, Jason.encode!(%{type: "ping", message: System.system_time(:second)})}
+      schedule_ping(state)
+      {:push, frame, state}
+    end
   end
 
   def handle_info({:cable_broadcast, stream, payload}, state) do
-    {:message_queue_len, queued} = Process.info(self(), :message_queue_len)
-    tuning = Config.tuning(state.instance)
-
-    if queued <= tuning.max_mailbox do
-      push_broadcast(stream, payload, %{state | slow_since: nil})
-    else
-      # Over the cap: disconnect only once it has stayed over for
-      # slow_client_ms, so a burst that drains is still delivered.
-      now = System.monotonic_time(:millisecond)
-      since = state.slow_since || now
-
-      if now - since >= tuning.slow_client_ms do
-        Logger.warning("Embassy.Rails.Connection: slow client, #{queued} queued; disconnecting")
-
-        frame =
-          {:text, Jason.encode!(%{type: "disconnect", reason: "slow_client", reconnect: true})}
-
-        {:stop, :normal, {1008, "slow_client"}, [frame], state}
-      else
-        push_broadcast(stream, payload, %{state | slow_since: since})
-      end
+    with {:ok, state} <- check_mailbox(state) do
+      push_broadcast(stream, payload, state)
     end
   end
 
@@ -207,6 +192,31 @@ defmodule Embassy.Rails.Connection do
 
   defp welcome?(transmission) do
     match?({:ok, %{"type" => "welcome"}}, Jason.decode(transmission))
+  end
+
+  # Over the cap: disconnect only once it has stayed over for
+  # slow_client_ms, so a burst that drains is still delivered.
+  defp check_mailbox(state) do
+    {:message_queue_len, queued} = Process.info(self(), :message_queue_len)
+    tuning = Config.tuning(state.instance)
+    now = System.monotonic_time(:millisecond)
+    since = state.slow_since || now
+
+    cond do
+      queued <= tuning.max_mailbox ->
+        {:ok, %{state | slow_since: nil}}
+
+      now - since >= tuning.slow_client_ms ->
+        Logger.warning("Embassy.Rails.Connection: slow client, #{queued} queued; disconnecting")
+
+        frame =
+          {:text, Jason.encode!(%{type: "disconnect", reason: "slow_client", reconnect: true})}
+
+        {:stop, :normal, {1008, "slow_client"}, [frame], state}
+
+      true ->
+        {:ok, %{state | slow_since: since}}
+    end
   end
 
   defp schedule_ping(state) do

@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Embassy.Rails.Health.ready?/1` is also false, for the `:redis` and
   `:redisx` broadcast sources, until the listener is subscribed or
   consuming, and while it cannot reach Redis.
+- The slow-client check (`:max_mailbox` / `:slow_client_ms`) also runs
+  on each ping tick, not only when a broadcast arrives.
 
 ### Added
 

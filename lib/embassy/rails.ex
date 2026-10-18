@@ -43,8 +43,8 @@ defmodule Embassy.Rails do
     * `:ping_interval` — ms between server pings (default `3_000`), or
       `:infinity` to disable them and rely on the proxy or client.
     * `:max_mailbox` — a connection whose mailbox has held more messages
-      than this for `:slow_client_ms` when a broadcast arrives is
-      disconnected as a slow client (default `1_000`).
+      than this for `:slow_client_ms`, checked on each broadcast and each
+      ping tick, is disconnected as a slow client (default `1_000`).
     * `:slow_client_ms` — how long a mailbox may stay over `:max_mailbox`
       before the client is disconnected, so a burst that drains is not
       cut off (default `5_000`; `0` disconnects at once).
