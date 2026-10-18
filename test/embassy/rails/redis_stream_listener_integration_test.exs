@@ -325,4 +325,31 @@ defmodule Embassy.Rails.RedisStreamListenerIntegrationTest do
 
     refute_receive {:cable_broadcast, _, _}, 100
   end
+
+  test "consume_when holds off reading until it returns true", ctx do
+    {:ok, gate} = Agent.start_link(fn -> false end)
+    start_listener(ctx, consumer: "gated", consume_when: fn -> Agent.get(gate, & &1) end)
+    Phoenix.PubSub.subscribe(__MODULE__.PubSub, Broadcast.topic("gated"))
+
+    xadd_payload(ctx.redis, ctx.stream, envelope("gated", "early"))
+    refute_receive {:redisx, :connected, _, _}, 300
+    refute Embassy.Rails.Health.source_ready?(ctx.instance)
+
+    # The group is created on the first read, at `$`; create it first, so
+    # the entry added while gated is delivered.
+    Redix.command!(ctx.redis, ["XGROUP", "CREATE", ctx.stream, "bx", "0"])
+    Agent.update(gate, fn _ -> true end)
+
+    assert_receive {:redisx, :connected, _, %{consumer: "gated"}}, 2_000
+    assert_receive {:cable_broadcast, "gated", %{data: "early"}}, 1_000
+    assert Embassy.Rails.Health.source_ready?(ctx.instance)
+  end
+
+  @tag :capture_log
+  test "a consume_when that raises holds off reading without crashing", ctx do
+    pid = start_listener(ctx, consumer: "raising", consume_when: fn -> raise "not yet" end)
+
+    refute_receive {:redisx, :connected, _, _}, 300
+    assert Process.alive?(pid)
+  end
 end

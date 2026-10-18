@@ -31,7 +31,10 @@ defmodule Embassy.Rails do
       `:channel` (defaults to `"__anycable__"`). For `source: :redisx`
       (AnyCable's Redis Streams broadcaster): `:redis` (a Redis URL or
       `Redix` options) and optionally `:stream` (`"__anycable__"`),
-      `:group` (`"bx"`), `:block_ms` (`2000`) and `:consumer`; see
+      `:group` (`"bx"`), `:block_ms` (`2000`), `:consumer` and
+      `:consume_when` (a zero-arity fun or `{m, f, a}`; the listener
+      does not join the group until it returns true, for example once
+      the node has joined the cluster); see
       `Embassy.Rails.RedisStreamListener`. Both Redis sources require the
       optional `:redix` dependency.
 
@@ -230,11 +233,23 @@ defmodule Embassy.Rails do
                   "(a Redis URL or Redix options)"
         end
 
-        :ok
+        validate_consume_when!(Keyword.get(broadcast, :consume_when))
 
       _ ->
         :ok
     end
+  end
+
+  defp validate_consume_when!(nil), do: :ok
+  defp validate_consume_when!(fun) when is_function(fun, 0), do: :ok
+
+  defp validate_consume_when!({m, f, a}) when is_atom(m) and is_atom(f) and is_list(a),
+    do: :ok
+
+  defp validate_consume_when!(other) do
+    raise ArgumentError,
+          "Embassy.Rails: broadcast :consume_when must be a zero-arity function or " <>
+            "an {module, function, args} tuple, got #{inspect(other)}"
   end
 
   @tuning_defaults [ping_interval: 3_000, max_mailbox: 1_000, slow_client_ms: 5_000]
@@ -388,7 +403,7 @@ defmodule Embassy.Rails do
       :redisx ->
         listener_opts =
           [instance: name, redis: Keyword.fetch!(broadcast, :redis)] ++
-            Keyword.take(broadcast, [:stream, :group, :block_ms, :consumer])
+            Keyword.take(broadcast, [:stream, :group, :block_ms, :consumer, :consume_when])
 
         [{Embassy.Rails.RedisStreamListener, listener_opts}]
 

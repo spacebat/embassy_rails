@@ -171,6 +171,7 @@ defmodule Embassy.RailsTest do
       end) || flunk("#{inspect(id)} was not restarted")
     end
 
+    @tag :capture_log
     test "a restarted config Registry restarts the children that read it" do
       name = Embassy.RailsTest.RegistryCrash
       start_supervised!({Embassy.Rails, redis_opts(name)})
@@ -242,6 +243,24 @@ defmodule Embassy.RailsTest do
 
     test "passes when source is :redisx and redix is available" do
       assert Embassy.Rails.validate_broadcast!([source: :redisx, redis: "redis://x"], true) == :ok
+    end
+
+    test "accepts consume_when as a zero-arity fun or an MFA tuple" do
+      for hook <- [fn -> true end, {Kernel, :is_atom, [:x]}] do
+        assert Embassy.Rails.validate_broadcast!(
+                 [source: :redisx, redis: "redis://x", consume_when: hook],
+                 true
+               ) == :ok
+      end
+    end
+
+    test "rejects any other consume_when" do
+      assert_raise ArgumentError, ~r/:consume_when/, fn ->
+        Embassy.Rails.validate_broadcast!(
+          [source: :redisx, redis: "redis://x", consume_when: fn _ -> true end],
+          true
+        )
+      end
     end
 
     test "raises when a Redis source has no :redis option" do

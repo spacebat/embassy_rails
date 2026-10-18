@@ -61,6 +61,11 @@ defmodule Embassy.Rails.RedisStreamListener do
     * `:group` - default `"bx"`
     * `:block_ms` - default `2000`
     * `:consumer` - default `"<node>-<6 random chars>"`
+    * `:consume_when` - a zero-arity fun or `{m, f, a}`, checked before
+      the listener first joins the group, and every 500 ms until it
+      returns true. The host's hook for "this node has joined the
+      cluster", so a node does not read entries it cannot pass on. A
+      hook that raises counts as false. Default: always true.
 
   ## Telemetry
 
@@ -85,6 +90,7 @@ defmodule Embassy.Rails.RedisStreamListener do
   @default_block_ms 2_000
   @read_count 100
   @max_backoff_ms 30_000
+  @gate_retry_ms 500
 
   @doc false
   # A shutdown waits for a blocked XREADGROUP to return before terminate/2
@@ -115,6 +121,7 @@ defmodule Embassy.Rails.RedisStreamListener do
       group: Keyword.get(opts, :group) || @default_group,
       block_ms: Keyword.get(opts, :block_ms) || @default_block_ms,
       consumer: Keyword.get(opts, :consumer) || default_consumer(),
+      consume_when: Keyword.get(opts, :consume_when),
       status: :initial,
       failures: 0,
       last_claimed_at: nil
@@ -153,7 +160,18 @@ defmodule Embassy.Rails.RedisStreamListener do
     stop_redix(state)
   end
 
-  defp poll(state) do
+  defp poll(%{status: :initial} = state) do
+    if may_consume?(state.consume_when) do
+      do_poll(state)
+    else
+      Process.send_after(self(), :poll, @gate_retry_ms)
+      {:noreply, state}
+    end
+  end
+
+  defp poll(state), do: do_poll(state)
+
+  defp do_poll(state) do
     with {:ok, state} <- ensure_group(state),
          {:ok, state} <- maybe_claim(state),
          {:ok, state} <- read(state) do
@@ -386,6 +404,22 @@ defmodule Embassy.Rails.RedisStreamListener do
   end
 
   # --- helpers ---
+
+  defp may_consume?(nil), do: true
+
+  defp may_consume?(hook) do
+    result =
+      case hook do
+        {m, f, a} -> apply(m, f, a)
+        fun -> fun.()
+      end
+
+    result == true
+  rescue
+    error ->
+      Logger.warning("Embassy.Rails.RedisStreamListener: consume_when raised: #{inspect(error)}")
+      false
+  end
 
   defp start_redix(redis) when is_binary(redis), do: Redix.start_link(redis)
   defp start_redix(redis) when is_list(redis), do: Redix.start_link(redis)

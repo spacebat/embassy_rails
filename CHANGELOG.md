@@ -27,6 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `broadcast: [source: :redisx, consume_when: fun | {m, f, a}]`: the
+  listener does not join the consumer group until the hook returns true,
+  so a host can hold a node off until it has joined the cluster.
 - Telemetry `[:embassy_rails, :rpc, :grpc, :connected]` each time the gRPC
   channel is (re)established.
 
