@@ -12,6 +12,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Requires `embassy ~> 0.3` (was `~> 0.2`). Only `Embassy.Config.snapshot/1`
   is used, so embassy 0.4 is accepted too.
 
+### Added
+
+- Telemetry `[:embassy_rails, :rpc, :grpc, :connected]` each time the gRPC
+  channel is (re)established.
+
+### Fixed
+
+- `Embassy.Rails.GrpcChannel` leaked a connection on each reconnect, and
+  a burst of failed calls opened one connection per call. It now closes
+  the old channel, and a reconnect request for a channel that has already
+  been replaced is ignored.
+
 ## [0.3.0] - 2026-10-18
 
 ### Added

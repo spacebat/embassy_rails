@@ -5,6 +5,14 @@ if Code.ensure_loaded?(GRPC.Stub) do
     publishes it to the instance Registry meta (`:grpc_channel`) for O(1)
     reads by `Embassy.Rails.RPC.Grpc`. Reconnects with capped backoff;
     a transient connect failure does not crash the instance.
+
+    A reconnect closes the previous channel first, so connections are not
+    leaked. Callers that saw a channel fail pass that channel to
+    `reconnect/2`; a request naming a channel that has already been
+    replaced is ignored, so a burst of failures opens one new connection.
+
+    Emits `[:embassy_rails, :rpc, :grpc, :connected]` (metadata
+    `instance`, `endpoint`) each time a channel is published.
     """
 
     use GenServer
@@ -34,22 +42,37 @@ if Code.ensure_loaded?(GRPC.Stub) do
       ArgumentError -> :error
     end
 
-    @doc false
-    def reconnect(instance) do
-      case GenServer.whereis(via(instance)) do
+    @doc """
+    Replace `failed`, the channel a caller saw fail, with a new one. Does
+    nothing if `failed` is no longer the current channel. With `:any`,
+    reconnects unconditionally.
+    """
+    @spec reconnect(atom(), GRPC.Channel.t() | :any) :: :ok
+    def reconnect(instance, failed \\ :any) do
+      case whereis(instance) do
         nil -> :ok
-        pid -> send(pid, :reconnect)
+        pid -> send(pid, {:reconnect, failed})
       end
+
+      :ok
     end
+
+    @doc false
+    def whereis(instance), do: GenServer.whereis(via(instance))
 
     defp via(instance), do: {:via, Registry, {Embassy.Rails.registry_name(instance), __MODULE__}}
 
     @impl true
     def init(opts) do
+      # So terminate/2 runs on shutdown and closes the channel.
+      Process.flag(:trap_exit, true)
+
       state = %{
         instance: Keyword.fetch!(opts, :instance),
         endpoint: Keyword.fetch!(opts, :endpoint),
         secret: Keyword.fetch!(opts, :secret),
+        channel: nil,
+        retry: nil,
         backoff: @backoff_start
       }
 
@@ -60,13 +83,26 @@ if Code.ensure_loaded?(GRPC.Stub) do
     def handle_continue(:connect, state), do: {:noreply, connect(state)}
 
     @impl true
-    def handle_info(:reconnect, state), do: {:noreply, connect(state)}
+    def handle_info(:retry, state), do: {:noreply, connect(%{state | retry: nil})}
 
-    @impl true
+    # Already disconnected, with a retry scheduled: that retry reconnects.
+    def handle_info({:reconnect, _failed}, %{channel: nil, retry: retry} = state)
+        when retry != nil,
+        do: {:noreply, state}
+
+    def handle_info({:reconnect, failed}, %{channel: channel} = state)
+        when failed == :any or failed == channel,
+        do: {:noreply, connect(state)}
+
+    def handle_info({:reconnect, _stale}, state), do: {:noreply, state}
+
     def handle_info(_msg, state), do: {:noreply, state}
 
+    @impl true
+    def terminate(_reason, state), do: close(state)
+
     defp connect(state) do
-      Registry.put_meta(Embassy.Rails.registry_name(state.instance), :grpc_channel, nil)
+      state = close(state)
 
       opts = [
         adapter: GRPC.Client.Adapters.Mint,
@@ -76,16 +112,37 @@ if Code.ensure_loaded?(GRPC.Stub) do
       case GRPC.Stub.connect(state.endpoint, opts) do
         {:ok, channel} ->
           Registry.put_meta(Embassy.Rails.registry_name(state.instance), :grpc_channel, channel)
-          %{state | backoff: @backoff_start}
+
+          :telemetry.execute([:embassy_rails, :rpc, :grpc, :connected], %{}, %{
+            instance: state.instance,
+            endpoint: state.endpoint
+          })
+
+          %{state | channel: channel, backoff: @backoff_start}
 
         {:error, reason} ->
           Logger.warning(
             "Embassy.Rails.GrpcChannel(#{inspect(state.instance)}): connect failed: #{inspect(reason)}; retrying in #{state.backoff}ms"
           )
 
-          Process.send_after(self(), :reconnect, state.backoff)
-          %{state | backoff: min(state.backoff * 2, @backoff_max)}
+          retry = Process.send_after(self(), :retry, state.backoff)
+          %{state | retry: retry, backoff: min(state.backoff * 2, @backoff_max)}
       end
+    end
+
+    # Unpublish first so no caller picks up a channel that is being closed.
+    defp close(%{channel: nil} = state), do: state
+
+    defp close(%{channel: channel} = state) do
+      Registry.put_meta(Embassy.Rails.registry_name(state.instance), :grpc_channel, nil)
+
+      try do
+        GRPC.Stub.disconnect(channel)
+      catch
+        :exit, _ -> :ok
+      end
+
+      %{state | channel: nil}
     end
   end
 else

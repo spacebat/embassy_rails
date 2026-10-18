@@ -8,6 +8,7 @@ defmodule Embassy.Rails.GrpcIntegrationTest do
   alias Embassy.Rails.RPC
   alias Embassy.Rails.Test.GrpcServer
   alias Embassy.Rails.Test.Helpers
+  alias Embassy.Rails.Test.TelemetryCollector
 
   setup do
     instance = :"grpc_int_#{System.unique_integer([:positive])}"
@@ -65,5 +66,32 @@ defmodule Embassy.Rails.GrpcIntegrationTest do
     :ok = GRPC.Server.stop(GrpcServer.Impl)
 
     refute Health.ready?(instance)
+  end
+
+  @tag :capture_log
+  test "a reconnect closes the previous connection", %{instance: instance} do
+    sup = GRPC.Client.Supervisor
+    children_before = DynamicSupervisor.count_children(sup).active
+
+    for _ <- 1..5 do
+      GrpcChannel.reconnect(instance)
+      :sys.get_state(GrpcChannel.whereis(instance))
+    end
+
+    assert {:ok, %GRPC.Channel{}} = GrpcChannel.fetch_channel(instance)
+    assert DynamicSupervisor.count_children(sup).active == children_before
+  end
+
+  @tag :capture_log
+  test "a burst of reconnect requests opens one connection", %{instance: instance} do
+    {:ok, collector} = TelemetryCollector.attach([[:embassy_rails, :rpc, :grpc, :connected]])
+    {:ok, before} = GrpcChannel.fetch_channel(instance)
+
+    for _ <- 1..20, do: GrpcChannel.reconnect(instance, before)
+    :sys.get_state(GrpcChannel.whereis(instance))
+
+    assert [{_, _, %{instance: ^instance}}] = TelemetryCollector.events(collector)
+    assert {:ok, after_burst} = GrpcChannel.fetch_channel(instance)
+    assert after_burst != before
   end
 end
