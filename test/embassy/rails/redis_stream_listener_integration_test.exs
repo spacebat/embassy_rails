@@ -378,4 +378,40 @@ defmodule Embassy.Rails.RedisStreamListenerIntegrationTest do
     assert consumer?(ctx, "c1")
     assert [1 | _] = Redix.command!(ctx.redis, ["XPENDING", ctx.stream, "bx"])
   end
+
+  test "no entry is claimed once draining has begun", ctx do
+    Redix.command!(ctx.redis, ["XGROUP", "CREATE", ctx.stream, "bx", "$", "MKSTREAM"])
+    xadd_payload(ctx.redis, ctx.stream, envelope("claimed", "x"))
+
+    Redix.command!(ctx.redis, [
+      "XREADGROUP",
+      "GROUP",
+      "bx",
+      "dead",
+      "COUNT",
+      "1",
+      "STREAMS",
+      ctx.stream,
+      ">"
+    ])
+
+    # Idle past block_ms, so the listener would claim it.
+    Process.sleep(150)
+    Phoenix.PubSub.subscribe(__MODULE__.PubSub, Broadcast.topic("claimed"))
+
+    # The hook runs after the poll's draining check: draining begins
+    # between that check and the claim, as Drain.terminate/2 marks it.
+    instance = ctx.instance
+
+    begin_drain = fn ->
+      :persistent_term.put({Embassy.Rails.Drain, instance}, true)
+      true
+    end
+
+    pid = start_listener(ctx, consumer: "c1", consume_when: begin_drain)
+    eventually(fn -> :sys.get_state(pid).status == :stopped end)
+
+    refute_received {:cable_broadcast, "claimed", _}
+    assert [1, _, _, [["dead", "1"]]] = Redix.command!(ctx.redis, ["XPENDING", ctx.stream, "bx"])
+  end
 end

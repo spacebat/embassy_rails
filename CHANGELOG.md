@@ -64,8 +64,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - With the `:redisx` source, a draining node kept reading the stream for
   the whole drain window, acking and deleting entries that, once the pod
   was cut off from its peers, reached only its own clients: every rolling
-  deploy lost broadcasts. The listener now stops reading when draining
-  begins, dispatches and acks what it already read, and removes its
+  deploy lost broadcasts. The listener now stops reading and claiming when
+  draining begins, dispatches and acks what it already read, and removes its
   consumer from the group, unless it still has pending entries (an ack
   that failed): `DELCONSUMER` would orphan those, so the consumer is kept
   for the other consumers to reclaim them. Its `XGROUP DELCONSUMER` on

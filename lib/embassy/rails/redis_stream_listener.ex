@@ -287,7 +287,12 @@ defmodule Embassy.Rails.RedisStreamListener do
   defp group_start(%{status: :initial}), do: "$"
   defp group_start(_state), do: "0"
 
+  # Draining can begin after the poll's check: claim nothing then.
   defp maybe_claim(state) do
+    if Drain.draining?(state.instance), do: {:ok, state}, else: claim_due(state)
+  end
+
+  defp claim_due(state) do
     now = System.monotonic_time(:millisecond)
 
     if state.last_claimed_at && now - state.last_claimed_at < state.block_ms do
