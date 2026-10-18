@@ -18,9 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the config Registry, then two `one_for_one` groups, `<name>.Services`
   (gRPC channel, task supervisor, presence) and `<name>.BroadcastSource`
   (the Redis listener). A config Registry restart now restarts the
-  children that depend on it; before, it took the whole instance down. A
-  broadcast listener that keeps crashing now exhausts only its own group's
-  restart intensity, and no longer stops the WebSockets.
+  children that depend on it; before, it took the whole instance down. The
+  broadcast group allows 10 listener restarts a minute (the default is
+  3 in 5 s), so a flapping listener no longer
+  stops the WebSockets; one that keeps crashing past that still escalates
+  and stops the instance.
 - `Embassy.Rails.Health.ready?/1` is also false, for the `:redis` and
   `:redisx` broadcast sources, until the listener is subscribed or
   consuming, and while it cannot reach Redis.

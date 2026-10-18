@@ -192,24 +192,31 @@ defmodule Embassy.Rails do
     # connections Registry comes first, so live connections stay registered
     # (and drainable) through that. Services and the broadcast source are
     # one_for_one groups of their own: a crash in one does not restart its
-    # siblings, and a broadcast listener that keeps crashing exhausts only
-    # its own group's restart intensity.
+    # siblings. The broadcast group allows 10 restarts a minute, so a
+    # flapping listener is absorbed there; one that keeps crashing past
+    # that escalates and, after three group failures in five seconds,
+    # stops the instance.
     children = [
       {Registry, keys: :duplicate, name: connections_name(name)},
       {Registry,
        keys: :unique, name: registry_name(name), meta: [config: snapshot, tuning: tuning]},
       group(services_name(name), services),
-      group(broadcast_source_name(name), broadcast_children(name, broadcast))
+      group(broadcast_source_name(name), broadcast_children(name, broadcast),
+        max_restarts: 10,
+        max_seconds: 60
+      )
     ]
 
     Supervisor.init(children, strategy: :rest_for_one)
   end
 
-  defp group(name, children) do
+  defp group(name, children, opts \\ []) do
+    opts = [strategy: :one_for_one, name: name] ++ opts
+
     %{
       id: name,
       type: :supervisor,
-      start: {Supervisor, :start_link, [children, [strategy: :one_for_one, name: name]]}
+      start: {Supervisor, :start_link, [children, opts]}
     }
   end
 

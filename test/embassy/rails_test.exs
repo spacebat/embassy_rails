@@ -188,13 +188,13 @@ defmodule Embassy.RailsTest do
       assert Embassy.Rails.Config.snapshot(name).name == name
     end
 
-    test "a crash-looping broadcast listener leaves connections and presence running" do
+    test "a listener restarted 16 times at once leaves connections and presence running" do
       name = Embassy.RailsTest.ListenerLoop
       sup = start_supervised!({Embassy.Rails, redis_opts(name)})
       connections = Process.whereis(Embassy.Rails.connections_name(name))
       tracker = find_child(name, Embassy.Rails.PresenceTracker)
 
-      Enum.reduce(1..6, find_child(name, Embassy.Rails.RedisListener), fn _, listener ->
+      Enum.reduce(1..16, find_child(name, Embassy.Rails.RedisListener), fn _, listener ->
         Process.exit(listener, :kill)
         await_restart(name, Embassy.Rails.RedisListener, listener)
       end)
