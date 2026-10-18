@@ -9,7 +9,10 @@ if Code.ensure_loaded?(GRPC.Stub) do
     A reconnect closes the previous channel first, so connections are not
     leaked. Callers that saw a channel fail pass that channel to
     `reconnect/2`; a request naming a channel that has already been
-    replaced is ignored, so a burst of failures opens one new connection.
+    replaced is ignored, so a burst of failures opens one new connection,
+    and a channel is replaced at most once a second. The connection
+    process is monitored, so one that dies is replaced without waiting
+    for a call to fail.
 
     Emits `[:embassy_rails, :rpc, :grpc, :connected]` (metadata
     `instance`, `endpoint`) each time a channel is published.
@@ -21,6 +24,11 @@ if Code.ensure_loaded?(GRPC.Stub) do
 
     @backoff_start 200
     @backoff_max 5_000
+    # A channel is replaced at most this often after a successful connect,
+    # so a server that accepts connections but fails every call (a proxy
+    # in front of a dead RPC server answers UNAVAILABLE) is not reconnected
+    # once per failed call.
+    @min_channel_age_ms 1_000
 
     @doc false
     def start_link(opts) do
@@ -73,6 +81,8 @@ if Code.ensure_loaded?(GRPC.Stub) do
         secret: Keyword.fetch!(opts, :secret),
         channel: nil,
         monitor: nil,
+        connected_at: nil,
+        replace: nil,
         retry: nil,
         backoff: @backoff_start
       }
@@ -91,24 +101,44 @@ if Code.ensure_loaded?(GRPC.Stub) do
         when retry != nil,
         do: {:noreply, state}
 
-    def handle_info({:reconnect, failed}, %{channel: channel} = state)
-        when failed == :any or failed == channel,
-        do: {:noreply, connect(state)}
+    def handle_info({:reconnect, :any}, state), do: {:noreply, connect(state)}
+
+    def handle_info({:reconnect, channel}, %{channel: channel} = state),
+      do: {:noreply, replace(state)}
 
     def handle_info({:reconnect, _stale}, state), do: {:noreply, state}
 
     # The connection process died. grpc links it to its own connection
     # process, not to this one, so it is monitored here.
     def handle_info({:DOWN, ref, :process, _pid, _reason}, %{monitor: ref} = state),
-      do: {:noreply, connect(%{state | monitor: nil})}
+      do: {:noreply, replace(%{state | monitor: nil})}
+
+    # A replacement cancelled by a reconnect may already have been sent.
+    def handle_info(:replace, %{replace: nil} = state), do: {:noreply, state}
+    def handle_info(:replace, state), do: {:noreply, connect(%{state | replace: nil})}
 
     def handle_info(_msg, state), do: {:noreply, state}
 
     @impl true
     def terminate(_reason, state), do: close(state)
 
+    # Replace the current channel now, or once it is old enough; requests
+    # meanwhile share the one scheduled replacement.
+    defp replace(%{replace: ref} = state) when ref != nil, do: state
+
+    defp replace(state) do
+      age = System.monotonic_time(:millisecond) - state.connected_at
+
+      if age >= @min_channel_age_ms do
+        connect(state)
+      else
+        %{state | replace: Process.send_after(self(), :replace, @min_channel_age_ms - age)}
+      end
+    end
+
     defp connect(state) do
-      state = close(state)
+      if state.replace, do: Process.cancel_timer(state.replace)
+      state = close(%{state | replace: nil})
 
       opts = [
         adapter: GRPC.Client.Adapters.Mint,
@@ -124,7 +154,13 @@ if Code.ensure_loaded?(GRPC.Stub) do
             endpoint: state.endpoint
           })
 
-          %{state | channel: channel, monitor: monitor(channel), backoff: @backoff_start}
+          %{
+            state
+            | channel: channel,
+              monitor: monitor(channel),
+              connected_at: System.monotonic_time(:millisecond),
+              backoff: @backoff_start
+          }
 
         {:error, reason} ->
           Logger.warning(

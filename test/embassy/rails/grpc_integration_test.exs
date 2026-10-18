@@ -156,10 +156,32 @@ defmodule Embassy.Rails.GrpcIntegrationTest do
     {:ok, before} = GrpcChannel.fetch_channel(instance)
 
     for _ <- 1..20, do: GrpcChannel.reconnect(instance, before)
-    :sys.get_state(GrpcChannel.whereis(instance))
+
+    assert Helpers.eventually(
+             fn -> match?({:ok, ch} when ch != before, GrpcChannel.fetch_channel(instance)) end,
+             100
+           )
 
     assert [{_, _, %{instance: ^instance}}] = TelemetryCollector.events(collector)
-    assert {:ok, after_burst} = GrpcChannel.fetch_channel(instance)
-    assert after_burst != before
+  end
+
+  # A proxy in front of a dead RPC server answers every call UNAVAILABLE
+  # on a channel that connected fine: each fresh channel fails at once.
+  @tag :capture_log
+  test "reconnects for a channel that keeps failing are at most one a second",
+       %{instance: instance} do
+    {:ok, collector} = TelemetryCollector.attach([[:embassy_rails, :rpc, :grpc, :connected]])
+    deadline = System.monotonic_time(:millisecond) + 1_500
+
+    Stream.repeatedly(fn -> System.monotonic_time(:millisecond) end)
+    |> Stream.take_while(&(&1 < deadline))
+    |> Enum.each(fn _ ->
+      with {:ok, ch} <- GrpcChannel.fetch_channel(instance),
+           do: GrpcChannel.reconnect(instance, ch)
+
+      Process.sleep(10)
+    end)
+
+    assert collector |> TelemetryCollector.events() |> Enum.count_until(3) <= 2
   end
 end

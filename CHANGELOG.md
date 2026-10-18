@@ -46,7 +46,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Embassy.Rails.GrpcChannel` leaked a connection on each reconnect, and
   a burst of failed calls opened one connection per call. It now closes
   the old channel, and a reconnect request for a channel that has already
-  been replaced is ignored.
+  been replaced is ignored. A channel is replaced at most once a second, so
+  a proxy that accepts connections but answers every call UNAVAILABLE does
+  not cause a reconnect per failed call.
 - A gRPC connection process that died (rather than closed) made every RPC
   call exit the calling WebSocket process, and was never replaced. Calls
   now return an error, and `GrpcChannel` monitors the connection process
