@@ -7,7 +7,10 @@ defmodule Embassy.Rails.Drain do
   spread over `:window_ms` (default 60_000) in `:batches` (default 20), so
   clients do not all reconnect at once. It then waits up to one more
   batch interval for the connections to close. While draining,
-  `Embassy.Rails.Upgrade` answers new upgrades with 503.
+  `Embassy.Rails.Upgrade` answers new upgrades with 503, and a `:redisx`
+  broadcast listener stops reading the stream and leaves its consumer
+  group, so the other nodes read every entry (see
+  `Embassy.Rails.RedisStreamListener`).
 
   Start it in your application tree **after** the Endpoint, so that it
   terminates first:

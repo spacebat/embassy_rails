@@ -239,4 +239,90 @@ defmodule Embassy.Rails.RedisStreamListenerIntegrationTest do
     assert_receive {:redisx, :connected, _, %{instance: __MODULE__.ReadyInstance}}, 1_000
     assert Embassy.Rails.Health.ready?(__MODULE__.ReadyInstance)
   end
+
+  defp drain(instance) do
+    start_supervised!({Embassy.Rails.Drain, instance: instance, window_ms: 10, batches: 1})
+    stop_supervised!({Embassy.Rails.Drain, instance})
+  end
+
+  defp consumer?(ctx, name) do
+    ctx.redis
+    |> Redix.command!(["XINFO", "CONSUMERS", ctx.stream, "bx"])
+    |> Enum.any?(&match?(["name", ^name | _], &1))
+  end
+
+  test "stops reading and removes its consumer once draining begins", ctx do
+    pid = start_listener(ctx, consumer: "c1")
+    assert_receive {:redisx, :connected, _, _}, 1_000
+    Phoenix.PubSub.subscribe(__MODULE__.PubSub, Broadcast.topic("drained"))
+
+    drain(ctx.instance)
+    eventually(fn -> not consumer?(ctx, "c1") end)
+
+    xadd_payload(ctx.redis, ctx.stream, envelope("drained", "late"))
+    refute_receive {:cable_broadcast, "drained", _}, 500
+    assert Redix.command!(ctx.redis, ["XLEN", ctx.stream]) == 1
+    assert Process.alive?(pid)
+    refute Embassy.Rails.Health.source_ready?(ctx.instance)
+  end
+
+  # Single-node stand-in for two nodes: each instance has its own PubSub,
+  # as if the draining node were already cut off from its peers.
+  test "broadcasting through a drain loses nothing, and after it only the other node reads",
+       ctx do
+    start_supervised!({Phoenix.PubSub, name: __MODULE__.OtherPubSub}, id: :other_pubsub)
+
+    start_supervised!(
+      {Embassy.Rails,
+       name: __MODULE__.Other,
+       embassy: __MODULE__.Embassy,
+       pubsub: __MODULE__.OtherPubSub,
+       rpc: [transport: {:http, "http://example.test"}, secret: "shh"],
+       broadcast: [source: :http, key: "bcast"]},
+      id: :other_instance
+    )
+
+    start_listener(ctx, consumer: "draining")
+    start_listener(%{ctx | instance: __MODULE__.Other}, consumer: "staying")
+    assert_receive {:redisx, :connected, _, %{consumer: "draining"}}, 1_000
+    assert_receive {:redisx, :connected, _, %{consumer: "staying"}}, 1_000
+
+    # Every entry is a batch for topics "d" and "s", but the test hears "d"
+    # only on the draining node's PubSub and "s" only on the other's, so
+    # each receipt names the node that read the entry.
+    Phoenix.PubSub.subscribe(__MODULE__.PubSub, Broadcast.topic("d"))
+    Phoenix.PubSub.subscribe(__MODULE__.OtherPubSub, Broadcast.topic("s"))
+    test_pid = self()
+
+    producer =
+      Task.async(fn ->
+        for i <- 1..40 do
+          batch = [%{stream: "d", data: "#{i}"}, %{stream: "s", data: "#{i}"}]
+          xadd_payload(ctx.redis, ctx.stream, Jason.encode!(batch))
+          send(test_pid, {:added, i, System.monotonic_time(:millisecond)})
+          if i == 10, do: send(test_pid, :drain_now)
+          Process.sleep(10)
+        end
+      end)
+
+    assert_receive :drain_now, 1_000
+    drain(ctx.instance)
+    eventually(fn -> not consumer?(ctx, "draining") end)
+    removed_at = System.monotonic_time(:millisecond)
+    Task.await(producer)
+
+    for i <- 1..40 do
+      data = "#{i}"
+      assert_receive {:added, ^i, added_at}
+
+      receive do
+        {:cable_broadcast, topic, %{data: ^data}} ->
+          if added_at > removed_at, do: assert(topic == "s", "entry #{i} read while draining")
+      after
+        2_000 -> flunk("entry #{i} was lost")
+      end
+    end
+
+    refute_receive {:cable_broadcast, _, _}, 100
+  end
 end

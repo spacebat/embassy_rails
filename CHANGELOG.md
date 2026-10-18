@@ -43,6 +43,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sent the drain message; it now drains itself on registration.
 - A disconnect RPC started while the instance was stopping could crash
   reading the instance config.
+- With the `:redisx` source, a draining node kept reading the stream for
+  the whole drain window, acking and deleting entries that, once the pod
+  was cut off from its peers, reached only its own clients: every rolling
+  deploy lost broadcasts. The listener now stops reading when draining
+  begins, dispatches and acks what it already read, and removes its
+  consumer from the group. Its `XGROUP DELCONSUMER` on shutdown is
+  bounded so it stays within the child spec's shutdown.
 
 ## [0.3.0] - 2026-10-18
 

@@ -20,14 +20,23 @@ defmodule Embassy.Rails.RedisStreamListener do
     * every block period, reclaims entries that another consumer left
       pending for longer than the block period (`XAUTOCLAIM`)
     * after dispatching, `XACK`s and `XDEL`s every entry
-    * removes its consumer from the group (`XGROUP DELCONSUMER`) on
-      shutdown
+    * stops reading once the instance begins draining
+      (`Embassy.Rails.Drain`), and removes its consumer from the group
+      (`XGROUP DELCONSUMER`) then, or on shutdown
 
   Delivery is at-least-once: an entry is dispatched before it is acked,
   so a crash in between means another consumer reclaims and dispatches
   it again. Entries without a `payload` field, or whose payload cannot be
   decoded, are acked and deleted with `:exception` telemetry rather than
   left to be reclaimed forever (anycable-go leaves them pending).
+
+  Draining stops consumption at once, rather than when the listener shuts
+  down after the drain window: a pod leaving a Kubernetes service is soon
+  disconnected from its peers, and any entry it read after that would
+  reach only its own clients. The read in flight when draining begins
+  still returns, and its entries are dispatched and acked; every entry is
+  acked before the next read, so nothing is pending when `DELCONSUMER`
+  runs (it discards a consumer's pending entries).
 
   Each entry reaches exactly one consumer in the group, so this source
   dispatches with `:cluster` scope. A multi-node deployment therefore
@@ -69,7 +78,7 @@ defmodule Embassy.Rails.RedisStreamListener do
   use GenServer
   require Logger
 
-  alias Embassy.Rails.{Broadcast, BroadcastEnvelope, Health}
+  alias Embassy.Rails.{Broadcast, BroadcastEnvelope, Drain, Health}
 
   @default_stream "__anycable__"
   @default_group "bx"
@@ -116,7 +125,35 @@ defmodule Embassy.Rails.RedisStreamListener do
   end
 
   @impl true
+  def handle_info(:poll, %{status: status} = state) when status in [:stopped, :stopping],
+    do: {:noreply, state}
+
   def handle_info(:poll, state) do
+    if Drain.draining?(state.instance),
+      do: {:noreply, stop_consuming(state)},
+      else: poll(state)
+  end
+
+  def handle_info({:EXIT, conn, reason}, %{conn: conn} = state) do
+    {:ok, new_conn} = start_redix(state.redis)
+    state = %{state | conn: new_conn}
+
+    if state.status in [:stopped, :stopping],
+      do: {:noreply, state},
+      else: {:noreply, disconnected(state, {:redix_exited, reason})}
+  end
+
+  def handle_info(_msg, state), do: {:noreply, state}
+
+  @impl true
+  def terminate(_reason, %{status: :stopped} = state), do: stop_redix(state)
+
+  def terminate(_reason, state) do
+    _ = remove_consumer(state)
+    stop_redix(state)
+  end
+
+  defp poll(state) do
     with {:ok, state} <- ensure_group(state),
          {:ok, state} <- maybe_claim(state),
          {:ok, state} <- read(state) do
@@ -127,16 +164,24 @@ defmodule Embassy.Rails.RedisStreamListener do
     end
   end
 
-  def handle_info({:EXIT, conn, reason}, %{conn: conn} = state) do
-    {:ok, new_conn} = start_redix(state.redis)
-    {:noreply, disconnected(%{state | conn: new_conn}, {:redix_exited, reason})}
+  # :stopping (DELCONSUMER failed) leaves the removal to terminate/2.
+  defp stop_consuming(state) do
+    Health.put_source_ready(state.instance, false)
+    Logger.info("Embassy.Rails.RedisStreamListener: draining, stopped reading #{state.stream}")
+
+    case remove_consumer(state) do
+      {:ok, _} -> %{state | status: :stopped}
+      {:error, _} -> %{state | status: :stopping}
+    end
   end
 
-  def handle_info(_msg, state), do: {:noreply, state}
+  # Bounded so a shutdown, which may first wait out a blocked read, stays
+  # within the child spec's budget.
+  defp remove_consumer(state) do
+    command(state, ["XGROUP", "DELCONSUMER", state.stream, state.group, state.consumer], 3_000)
+  end
 
-  @impl true
-  def terminate(_reason, state) do
-    _ = command(state, ["XGROUP", "DELCONSUMER", state.stream, state.group, state.consumer])
+  defp stop_redix(state) do
     _ = catch_exit(fn -> Redix.stop(state.conn) end)
     :ok
   end
@@ -232,7 +277,13 @@ defmodule Embassy.Rails.RedisStreamListener do
     end
   end
 
+  # Draining can begin while the claim runs; check again just before the
+  # read.
   defp read(state) do
+    if Drain.draining?(state.instance), do: {:ok, state}, else: do_read(state)
+  end
+
+  defp do_read(state) do
     cmd = [
       "XREADGROUP",
       "GROUP",
