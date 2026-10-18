@@ -61,24 +61,65 @@ defmodule Embassy.Rails.Health do
     end
   end
 
-  defp tcp_ok?("unix:" <> path), do: connect_ok?({:local, path}, 0)
+  @doc false
+  # An endpoint the probe cannot parse is left to the channel check.
+  @spec tcp_ok?(String.t()) :: boolean()
+  def tcp_ok?(endpoint) do
+    case probe_address(endpoint) do
+      {:ok, {address, port}} -> connect_ok?(address, port)
+      :error -> true
+    end
+  end
 
-  defp tcp_ok?(endpoint) do
-    case endpoint |> String.replace(~r{^\w+://}, "") |> String.split(":") |> Enum.split(-1) do
-      {[_ | _] = host, [port]} ->
-        case Integer.parse(port) do
-          {port, ""} -> connect_ok?(host |> Enum.join(":") |> String.to_charlist(), port)
-          _ -> true
-        end
+  @doc false
+  # The first address of a gRPC target: `host:port`, `[v6]:port`,
+  # `dns:[//authority/]host:port`, `ipv4:a:port[,...]`,
+  # `ipv6:[a]:port[,...]` or `unix:path`.
+  @spec probe_address(String.t()) ::
+          {:ok, {charlist() | {:local, String.t()}, non_neg_integer()}} | :error
+  def probe_address("unix://" <> path), do: {:ok, {{:local, path}, 0}}
+  def probe_address("unix:" <> path), do: {:ok, {{:local, path}, 0}}
+  def probe_address("dns:" <> rest), do: rest |> strip_authority() |> host_port()
+  def probe_address("ipv4:" <> rest), do: rest |> first_address() |> host_port()
+  def probe_address("ipv6:" <> rest), do: rest |> first_address() |> host_port()
+  def probe_address(target), do: host_port(target)
 
-      # An endpoint this probe cannot parse is left to the channel check.
-      _ ->
-        true
+  defp strip_authority("//" <> rest) do
+    case String.split(rest, "/", parts: 2) do
+      [_authority, target] -> target
+      _ -> ""
+    end
+  end
+
+  defp strip_authority(target), do: target
+
+  defp first_address(list), do: list |> String.split(",", parts: 2) |> hd()
+
+  defp host_port("[" <> rest) do
+    case String.split(rest, "]:", parts: 2) do
+      [host, port] -> with_port(host, port)
+      _ -> :error
+    end
+  end
+
+  defp host_port(target) do
+    case String.split(target, ":") do
+      [host, port] when host != "" -> with_port(host, port)
+      _ -> :error
+    end
+  end
+
+  defp with_port(host, port) do
+    case Integer.parse(port) do
+      {port, ""} -> {:ok, {String.to_charlist(host), port}}
+      _ -> :error
     end
   end
 
   defp connect_ok?(address, port) do
-    case :gen_tcp.connect(address, port, [:binary, active: false], @probe_timeout) do
+    family = if ipv6?(address), do: [:inet6], else: []
+
+    case :gen_tcp.connect(address, port, [:binary, active: false] ++ family, @probe_timeout) do
       {:ok, socket} ->
         :gen_tcp.close(socket)
         true
@@ -87,6 +128,11 @@ defmodule Embassy.Rails.Health do
         false
     end
   end
+
+  defp ipv6?(address) when is_list(address),
+    do: match?({:ok, _}, :inet.parse_ipv6strict_address(address))
+
+  defp ipv6?(_address), do: false
 
   defp http_ok?(request, finch) do
     match?(

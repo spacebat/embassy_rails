@@ -58,4 +58,42 @@ defmodule Embassy.Rails.HealthTest do
       end
     end
   end
+
+  describe "probe_address/1" do
+    test "parses every gRPC target form to the first address" do
+      for {target, expected} <- [
+            {"127.0.0.1:50051", {~c"127.0.0.1", 50051}},
+            {"rpc.svc:50051", {~c"rpc.svc", 50051}},
+            {"dns:rpc.svc:50051", {~c"rpc.svc", 50051}},
+            {"dns:///rpc.svc:50051", {~c"rpc.svc", 50051}},
+            {"dns://8.8.8.8/rpc.svc:50051", {~c"rpc.svc", 50051}},
+            {"ipv4:10.0.0.1:50051", {~c"10.0.0.1", 50051}},
+            {"ipv4:10.0.0.1:50051,10.0.0.2:50051", {~c"10.0.0.1", 50051}},
+            {"ipv6:[::1]:50051", {~c"::1", 50051}},
+            {"[::1]:50051", {~c"::1", 50051}},
+            {"unix:/tmp/rpc.sock", {{:local, "/tmp/rpc.sock"}, 0}},
+            {"unix:///tmp/rpc.sock", {{:local, "/tmp/rpc.sock"}, 0}}
+          ] do
+        assert Health.probe_address(target) == {:ok, expected}, target
+      end
+    end
+
+    test "is :error for a target it cannot parse" do
+      for target <- ["rpc.svc", "rpc.svc:http", "ipv4:", ""] do
+        assert Health.probe_address(target) == :error, target
+      end
+    end
+  end
+
+  test "the TCP probe reaches an IPv6 loopback endpoint" do
+    case :gen_tcp.listen(0, [:inet6, ip: {0, 0, 0, 0, 0, 0, 0, 1}]) do
+      {:ok, listener} ->
+        {:ok, port} = :inet.port(listener)
+        assert Health.tcp_ok?("ipv6:[::1]:#{port}")
+        :gen_tcp.close(listener)
+
+      {:error, _} ->
+        :ok
+    end
+  end
 end

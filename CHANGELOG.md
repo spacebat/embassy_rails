@@ -58,6 +58,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   begins, dispatches and acks what it already read, and removes its
   consumer from the group. Its `XGROUP DELCONSUMER` on shutdown is
   bounded so it stays within the child spec's shutdown.
+- The gRPC readiness probe misread `ipv4:`, `ipv6:`, `dns://authority/`
+  and comma-list targets, and could not reach an IPv6 address; it now
+  probes the first address of any gRPC target form.
 
 ## [0.3.0] - 2026-10-18
 
