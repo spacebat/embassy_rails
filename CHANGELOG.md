@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The gRPC transport never recovered after the RPC server restarted: the
+  closed-connection error was not recognized, so no reconnect was made
+  and every call failed until the node restarted.
 - `Embassy.Rails.GrpcChannel` leaked a connection on each reconnect, and
   a burst of failed calls opened one connection per call. It now closes
   the old channel, and a reconnect request for a channel that has already

@@ -150,4 +150,22 @@ defmodule Embassy.Rails.RPC.GrpcTest do
       assert {:error, :no_channel} = Grpc.call(instance, :connect, req)
     end
   end
+
+  describe "connection_lost?/1" do
+    test "a closed connection or an unavailable server needs a new channel" do
+      assert Grpc.connection_lost?(
+               {:grpc, 2,
+                ~s(error occurred while receiving data: {:error, "the connection is closed"})}
+             )
+
+      assert Grpc.connection_lost?({:grpc, 14, "unavailable"})
+      assert Grpc.connection_lost?({:grpc, :closed})
+    end
+
+    test "a deadline or another status keeps the channel" do
+      refute Grpc.connection_lost?({:grpc, 4, "deadline exceeded"})
+      refute Grpc.connection_lost?({:grpc, 2, "boom"})
+      refute Grpc.connection_lost?({:grpc, 16, "unauthenticated"})
+    end
+  end
 end

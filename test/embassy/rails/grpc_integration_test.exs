@@ -31,7 +31,7 @@ defmodule Embassy.Rails.GrpcIntegrationTest do
              match?({:ok, _}, GrpcChannel.fetch_channel(instance))
            end)
 
-    {:ok, instance: instance}
+    {:ok, instance: instance, endpoint: endpoint}
   end
 
   test "connect returns the normalized success map", %{instance: instance} do
@@ -66,6 +66,21 @@ defmodule Embassy.Rails.GrpcIntegrationTest do
     :ok = GRPC.Server.stop(GrpcServer.Impl)
 
     refute Health.ready?(instance)
+  end
+
+  @tag :capture_log
+  test "calls recover once a restarted gRPC server is back on the same port",
+       %{instance: instance, endpoint: endpoint} do
+    env = %{url: "wss://t/", headers: %{}, cstate: %{}, istate: %{}}
+    assert {:ok, _} = RPC.connect(instance, env)
+
+    :ok = GRPC.Server.stop(GrpcServer.Impl)
+    assert {:error, _} = RPC.connect(instance, env)
+
+    [_host, port] = String.split(endpoint, ":")
+    {:ok, _pid, _port} = GRPC.Server.start(GrpcServer.Impl, String.to_integer(port))
+
+    assert Helpers.eventually(fn -> match?({:ok, _}, RPC.connect(instance, env)) end)
   end
 
   @tag :capture_log

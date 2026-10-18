@@ -107,19 +107,19 @@ if Code.ensure_loaded?(GRPC.Stub) do
     def call(instance, op, request, opts \\ []) do
       case GrpcChannel.fetch_channel(instance) do
         {:ok, channel} ->
-          case do_call(channel, op, request, opts) do
-            {:error, {:grpc, _}} = err ->
-              GrpcChannel.reconnect(instance)
-              err
-
-            other ->
-              other
-          end
+          channel |> do_call(op, request, opts) |> maybe_reconnect(instance, channel)
 
         :error ->
           {:error, :no_channel}
       end
     end
+
+    defp maybe_reconnect({:error, reason} = err, instance, channel) do
+      if connection_lost?(reason), do: GrpcChannel.reconnect(instance, channel)
+      err
+    end
+
+    defp maybe_reconnect(ok, _instance, _channel), do: ok
 
     defp do_call(channel, :connect, request, opts) do
       case AnycableStub.connect(channel, request, opts) do
@@ -141,6 +141,19 @@ if Code.ensure_loaded?(GRPC.Stub) do
         {:error, reason} -> {:error, grpc_error(reason)}
       end
     end
+
+    # The connection, not the call, failed: the Mint connection process
+    # stays closed after the server goes away, so only a new channel
+    # recovers. A deadline or an application status is not a reason to
+    # reconnect.
+    @doc false
+    def connection_lost?({:grpc, 14, _message}), do: true
+
+    def connection_lost?({:grpc, 2, message}) when is_binary(message),
+      do: String.contains?(message, "connection is closed")
+
+    def connection_lost?({:grpc, _status, _message}), do: false
+    def connection_lost?({:grpc, _other}), do: true
 
     defp grpc_error(%GRPC.RPCError{status: status, message: message}),
       do: {:grpc, status, message}
