@@ -95,14 +95,17 @@ defmodule Embassy.Rails.ConnectionTest do
   end
 
   test "terminate/2 with identifiers fires disconnect RPC", %{bypass: bypass, state: state} do
+    test_pid = self()
+
     Bypass.expect_once(bypass, "POST", "/_anycable/disconnect", fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      send(test_pid, {:disconnect_rpc, Jason.decode!(body)})
       Plug.Conn.resp(conn, 200, "{}")
     end)
 
     state_with_ids = %{state | identifiers: "abc", streams: %{"chat" => "{}"}}
     assert :ok = Connection.terminate(:normal, state_with_ids)
-    # Give the async disconnect task time to fire.
-    Process.sleep(200)
+    assert_receive {:disconnect_rpc, %{"identifiers" => "abc"}}, 1_000
   end
 
   test "handle_in subscribe: applies streams, pushes transmissions, mutates state", %{
@@ -283,19 +286,27 @@ defmodule Embassy.Rails.ConnectionTest do
         [:embassy_rails, :ws, :connection, :close]
       ])
 
-    Bypass.expect(bypass, "POST", "/_anycable/disconnect", fn conn ->
+    test_pid = self()
+
+    Bypass.expect_once(bypass, "POST", "/_anycable/disconnect", fn conn ->
+      send(test_pid, :disconnect_rpc)
       Plug.Conn.resp(conn, 200, "{}")
     end)
 
     state_with_ids = %{state | identifiers: "abc"}
     Connection.terminate(:normal, state_with_ids)
+    assert_receive :disconnect_rpc, 1_000
 
-    # Give the async disconnect task time to fire (mirrors existing terminate test).
-    Process.sleep(200)
+    # The handler is global: keep only this instance's events, since other
+    # async test modules close connections of their own.
+    events =
+      collector
+      |> Embassy.Rails.Test.TelemetryCollector.events()
+      |> Enum.filter(fn {_, _, meta} ->
+        meta.instance == Embassy.Rails.ConnectionTest.Instance
+      end)
 
-    events = Embassy.Rails.Test.TelemetryCollector.events(collector)
-    assert [{[:embassy_rails, :ws, :connection, :close], _measurements, meta}] = events
-    assert meta.instance == Embassy.Rails.ConnectionTest.Instance
+    assert [{[:embassy_rails, :ws, :connection, :close], _measurements, _meta}] = events
   end
 
   test "command reply merges changed istate/cstate keys into existing state",
