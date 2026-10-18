@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Requires `embassy ~> 0.3` (was `~> 0.2`). Only `Embassy.Config.snapshot/1`
   is used, so embassy 0.4 is accepted too.
+- `Embassy.Rails.RPC.disconnect/2` runs under a `Task.Supervisor` in the
+  instance's tree, capped by the new `rpc: [max_disconnects: n]` option
+  (default 1000); a disconnect over the cap is dropped with a warning.
 
 ### Added
 
@@ -28,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   been replaced is ignored.
 - A connection whose connect RPC completed after draining began was never
   sent the drain message; it now drains itself on registration.
+- A disconnect RPC started while the instance was stopping could crash
+  reading the instance config.
 
 ## [0.3.0] - 2026-10-18
 

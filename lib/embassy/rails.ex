@@ -20,7 +20,10 @@ defmodule Embassy.Rails do
       `{:http, base_url}`, or `{:grpc, endpoint}`) and `:secret` (bearer
       token). The `:grpc` form requires the optional `:grpc` and
       `:protobuf` deps. Optional `:timeout` (ms, default 5000) bounds
-      each RPC call.
+      each RPC call. Optional `:max_disconnects` (default `1_000`) caps
+      the disconnect RPCs in flight at once; one over the cap is dropped
+      with a warning, as anycable-go does when its disconnect queue is
+      full.
     * `:broadcast` — keyword. Must include `:source`. For
       `source: :http`: `:key` (bearer token for `POST /_broadcast`).
       For `source: :redis` (AnyCable's Pub/Sub broadcaster): `:redis` (a
@@ -130,6 +133,9 @@ defmodule Embassy.Rails do
   @doc false
   def registry_name(name), do: Module.concat(name, Registry)
 
+  @doc false
+  def tasks_name(name), do: Module.concat(name, Tasks)
+
   @doc "Name of the duplicate-key Registry every live Connection registers in (key `:conn`)."
   @spec connections_name(atom()) :: atom()
   def connections_name(name), do: Module.concat(name, Connections)
@@ -168,6 +174,10 @@ defmodule Embassy.Rails do
         {Registry, keys: :duplicate, name: connections_name(name)}
       ] ++
         rpc_children(name, rpc) ++
+        [
+          {Task.Supervisor,
+           name: tasks_name(name), max_children: Keyword.get(rpc, :max_disconnects, 1_000)}
+        ] ++
         presence_children(name, pubsub, snapshot.presence) ++
         broadcast_children(name, broadcast)
 

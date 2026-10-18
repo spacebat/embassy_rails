@@ -65,13 +65,67 @@ defmodule Embassy.Rails.RPCTest do
     bypass: bypass,
     instance: instance
   } do
+    test_pid = self()
+
     Bypass.expect_once(bypass, "POST", "/_anycable/disconnect", fn conn ->
-      Plug.Conn.resp(conn, 200, "{}")
+      send(test_pid, {:disconnect_posted, self()})
+
+      receive do
+        :release -> Plug.Conn.resp(conn, 200, "{}")
+      end
     end)
 
     assert :ok == RPC.disconnect(instance, %{identifiers: "abc", subscriptions: []})
-    # Give the async task time to actually post before bypass tears down.
-    Process.sleep(200)
+    assert_receive {:disconnect_posted, handler}, 1_000
+
+    tasks = Embassy.Rails.tasks_name(instance)
+    assert [task] = Task.Supervisor.children(tasks)
+    ref = Process.monitor(task)
+
+    send(handler, :release)
+    assert_receive {:DOWN, ^ref, :process, ^task, :normal}, 1_000
+  end
+
+  @tag :capture_log
+  test "disconnect/2 drops a disconnect over the rpc :max_disconnects cap", %{bypass: bypass} do
+    instance = __MODULE__.Capped
+    test_pid = self()
+
+    start_supervised!(
+      {Embassy.Rails,
+       name: instance,
+       embassy: Embassy.Rails.RPCTest.Embassy,
+       pubsub: Embassy.Rails.RPCTest.PubSub,
+       rpc: [
+         transport: {:http, "http://localhost:#{bypass.port}"},
+         secret: "rpc-secret",
+         max_disconnects: 1
+       ],
+       broadcast: [source: :http, key: "bcast"]},
+      id: instance
+    )
+
+    Bypass.expect_once(bypass, "POST", "/_anycable/disconnect", fn conn ->
+      send(test_pid, {:disconnect_posted, self()})
+
+      receive do
+        :release -> Plug.Conn.resp(conn, 200, "{}")
+      end
+    end)
+
+    assert :ok == RPC.disconnect(instance, %{identifiers: "a", subscriptions: []})
+    assert_receive {:disconnect_posted, handler}, 1_000
+
+    assert :ok == RPC.disconnect(instance, %{identifiers: "b", subscriptions: []})
+    assert [task] = Task.Supervisor.children(Embassy.Rails.tasks_name(instance))
+    ref = Process.monitor(task)
+
+    send(handler, :release)
+    assert_receive {:DOWN, ^ref, :process, ^task, :normal}, 1_000
+  end
+
+  test "disconnect/2 is a no-op for an instance that is not running" do
+    assert :ok == RPC.disconnect(__MODULE__.NotRunning, %{identifiers: "a", subscriptions: []})
   end
 
   test "non-200 response returns {:error, {:http, status, body}}", %{

@@ -34,15 +34,40 @@ defmodule Embassy.Rails.RPC do
   @spec command(atom(), map()) :: {:ok, map()} | {:error, term()}
   def command(instance, payload), do: dispatch(instance, :command, "/_anycable/command", payload)
 
+  @doc """
+  Fire-and-forget: runs under the instance's task supervisor, at most
+  `rpc: [max_disconnects: n]` at once. Returns `:ok` without sending when
+  the instance is not running or the cap is reached.
+  """
   @spec disconnect(atom(), map()) :: :ok
   def disconnect(instance, payload) do
-    Task.start(fn -> dispatch(instance, :disconnect, "/_anycable/disconnect", payload) end)
-    :ok
+    # Read the snapshot here: once the instance is stopping, a task that
+    # read it itself could find it gone.
+    snap = Config.snapshot(instance)
+    work = fn -> dispatch(instance, snap, :disconnect, "/_anycable/disconnect", payload) end
+
+    case Task.Supervisor.start_child(Embassy.Rails.tasks_name(instance), work) do
+      {:ok, _pid} ->
+        :ok
+
+      {:error, :max_children} ->
+        Logger.warning(
+          "Embassy.Rails.RPC(#{inspect(instance)}): dropping a disconnect, " <>
+            "max_disconnects in flight"
+        )
+
+        :ok
+    end
+  rescue
+    Embassy.Rails.NotStartedError -> :ok
+  catch
+    :exit, _ -> :ok
   end
 
-  defp dispatch(instance, op, path, body) do
-    snap = Config.snapshot(instance)
+  defp dispatch(instance, op, path, body),
+    do: dispatch(instance, Config.snapshot(instance), op, path, body)
 
+  defp dispatch(instance, snap, op, path, body) do
     case snap.rpc[:transport] do
       {:grpc, _endpoint} -> grpc_dispatch(instance, op, body, snap)
       _ -> post(instance, op, path, body, snap)
