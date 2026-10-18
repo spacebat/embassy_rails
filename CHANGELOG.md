@@ -29,6 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `idle_timeout:` instance option (default `60_000`, or `:infinity`): how
+  long a WebSocket may go without client data before it is closed. It was
+  fixed at 60 s.
 - `broadcast: [source: :redisx, consume_when: fun | {m, f, a}]`: the
   listener does not join the consumer group until the hook returns true,
   so a host can hold a node off until it has joined the cluster.

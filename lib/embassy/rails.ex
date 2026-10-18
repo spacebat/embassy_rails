@@ -48,6 +48,9 @@ defmodule Embassy.Rails do
     * `:slow_client_ms` — how long a mailbox may stay over `:max_mailbox`
       before the client is disconnected, so a burst that drains is not
       cut off (default `5_000`; `0` disconnects at once).
+    * `:idle_timeout` — ms without any data from the client before the
+      WebSocket is closed (default `60_000`), or `:infinity`. Passed to
+      `WebSockAdapter.upgrade/4` as `:timeout`.
     * `:headers` — list of extra request header names forwarded to the RPC
       `Env` (case-insensitive), added to the defaults
       `cookie`, `user-agent`, `origin`, `x-forwarded-for`, `x-real-ip`.
@@ -252,13 +255,19 @@ defmodule Embassy.Rails do
             "an {module, function, args} tuple, got #{inspect(other)}"
   end
 
-  @tuning_defaults [ping_interval: 3_000, max_mailbox: 1_000, slow_client_ms: 5_000]
+  @tuning_defaults [
+    ping_interval: 3_000,
+    max_mailbox: 1_000,
+    slow_client_ms: 5_000,
+    idle_timeout: 60_000
+  ]
 
   @doc false
   @spec normalize_tuning!(keyword()) :: %{
           ping_interval: pos_integer() | :infinity,
           max_mailbox: pos_integer(),
-          slow_client_ms: non_neg_integer()
+          slow_client_ms: non_neg_integer(),
+          idle_timeout: pos_integer() | :infinity
         }
   def normalize_tuning!(opts) do
     tuning =
@@ -279,6 +288,12 @@ defmodule Embassy.Rails do
       raise ArgumentError,
             "Embassy.Rails: :slow_client_ms must be a non-negative integer, " <>
               "got #{inspect(tuning.slow_client_ms)}"
+    end
+
+    unless tuning.idle_timeout == :infinity or pos_integer?(tuning.idle_timeout) do
+      raise ArgumentError,
+            "Embassy.Rails: :idle_timeout must be a positive integer or :infinity, " <>
+              "got #{inspect(tuning.idle_timeout)}"
     end
 
     tuning

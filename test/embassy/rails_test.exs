@@ -90,7 +90,9 @@ defmodule Embassy.RailsTest do
           ping_interval: "3000",
           max_mailbox: 0,
           max_mailbox: :infinity,
-          slow_client_ms: -1
+          slow_client_ms: -1,
+          idle_timeout: 0,
+          idle_timeout: "60000"
         ] do
       test "rejects #{key}: #{inspect(bad)}" do
         opts = valid_opts(Embassy.RailsTest.BadTuning) ++ [{unquote(key), unquote(bad)}]
@@ -101,8 +103,11 @@ defmodule Embassy.RailsTest do
       end
     end
 
-    test "accepts ping_interval: :infinity and slow_client_ms: 0" do
-      opts = valid_opts(Embassy.RailsTest.Tuned) ++ [ping_interval: :infinity, slow_client_ms: 0]
+    test "accepts ping_interval: :infinity, slow_client_ms: 0 and idle_timeout: :infinity" do
+      opts =
+        valid_opts(Embassy.RailsTest.Tuned) ++
+          [ping_interval: :infinity, slow_client_ms: 0, idle_timeout: :infinity]
+
       assert {:ok, _} = start_supervised({Embassy.Rails, opts})
     end
   end

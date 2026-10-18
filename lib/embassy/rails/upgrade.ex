@@ -96,7 +96,7 @@ defmodule Embassy.Rails.Upgrade do
 
     conn
     |> put_resp_header("sec-websocket-protocol", chosen)
-    |> WebSockAdapter.upgrade(Embassy.Rails.Connection, state, timeout: 60_000)
+    |> WebSockAdapter.upgrade(Embassy.Rails.Connection, state, timeout: snap.tuning.idle_timeout)
     |> halt()
   end
 

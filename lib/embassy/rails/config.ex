@@ -38,7 +38,8 @@ defmodule Embassy.Rails.Config do
   @type tuning :: %{
           ping_interval: pos_integer() | :infinity,
           max_mailbox: pos_integer(),
-          slow_client_ms: non_neg_integer()
+          slow_client_ms: non_neg_integer(),
+          idle_timeout: pos_integer() | :infinity
         }
 
   @doc """

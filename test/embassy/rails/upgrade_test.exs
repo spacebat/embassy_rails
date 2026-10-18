@@ -56,6 +56,38 @@ defmodule Embassy.Rails.UpgradeTest do
     # the resp-header echo above is sufficient evidence that the upgrade path was taken.
   end
 
+  test "the WebSocket idle timeout defaults to 60s", %{opts: opts} do
+    conn =
+      ws_conn(headers: [{"sec-websocket-protocol", "actioncable-v1-json"}])
+      |> Upgrade.call(opts)
+
+    assert idle_timeout(conn) == 60_000
+  end
+
+  test "the instance's idle_timeout sets the WebSocket idle timeout" do
+    start_supervised!(
+      {Embassy.Rails,
+       name: __MODULE__.IdleInstance,
+       embassy: Embassy.Rails.UpgradeTest.Embassy,
+       pubsub: Embassy.Rails.UpgradeTest.PubSub,
+       rpc: [transport: {:http, "http://example.test"}, secret: "shh"],
+       broadcast: [source: :http, key: "bcast"],
+       idle_timeout: 5_000},
+      id: :idle_instance
+    )
+
+    conn =
+      ws_conn(headers: [{"sec-websocket-protocol", "actioncable-v1-json"}])
+      |> Upgrade.call(Upgrade.init(embassy_rails: __MODULE__.IdleInstance))
+
+    assert idle_timeout(conn) == 5_000
+  end
+
+  defp idle_timeout(conn) do
+    assert [{:websocket, {_handler, _state, opts}}] = Plug.Test.sent_upgrades(conn)
+    Keyword.fetch!(opts, :timeout)
+  end
+
   test "echoes actioncable-v1-ext-json when requested", %{opts: opts} do
     conn =
       ws_conn(headers: [{"sec-websocket-protocol", "actioncable-v1-ext-json"}])
