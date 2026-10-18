@@ -73,6 +73,17 @@ defmodule Embassy.RailsTest do
     end
   end
 
+  # A group restarting under the walk counts as not found.
+  defp find_child(sup, id) do
+    Enum.find_value(Supervisor.which_children(sup), fn
+      {^id, pid, _, _} when is_pid(pid) -> pid
+      {_, pid, :supervisor, _} when is_pid(pid) -> find_child(pid, id)
+      _ -> nil
+    end)
+  catch
+    :exit, _ -> nil
+  end
+
   describe "connection tuning options" do
     for {key, bad} <- [
           ping_interval: 0,
@@ -126,11 +137,7 @@ defmodule Embassy.RailsTest do
          broadcast: [source: :redis, redis: [host: "127.0.0.1", port: 1]]}
       )
 
-      children = Supervisor.which_children(__MODULE__.RedisInstance)
-
-      assert Enum.any?(children, fn {id, pid, _type, _mods} ->
-               id == Embassy.Rails.RedisListener and is_pid(pid)
-             end)
+      assert is_pid(find_child(__MODULE__.RedisInstance, Embassy.Rails.RedisListener))
     end
 
     test "does not start a RedisListener child when source is :http" do
@@ -143,11 +150,68 @@ defmodule Embassy.RailsTest do
          broadcast: [source: :http, key: "bcast"]}
       )
 
-      children = Supervisor.which_children(__MODULE__.HttpInstance)
+      refute find_child(__MODULE__.HttpInstance, Embassy.Rails.RedisListener)
+    end
+  end
 
-      refute Enum.any?(children, fn {id, _pid, _type, _mods} ->
-               id == Embassy.Rails.RedisListener
+  describe "supervision" do
+    defp redis_opts(name) do
+      valid_opts(name)
+      |> Keyword.put(:broadcast, source: :redis, redis: [host: "127.0.0.1", port: 1])
+    end
+
+    # Depth-first search of the instance tree for the child with `id`.
+
+    defp await_restart(sup, id, old) do
+      Enum.find_value(1..100, fn _ ->
+        case find_child(sup, id) do
+          pid when is_pid(pid) and pid != old -> pid
+          _ -> Process.sleep(10) && nil
+        end
+      end) || flunk("#{inspect(id)} was not restarted")
+    end
+
+    test "a restarted config Registry restarts the children that read it" do
+      name = Embassy.RailsTest.RegistryCrash
+      start_supervised!({Embassy.Rails, redis_opts(name)})
+      listener = find_child(name, Embassy.Rails.RedisListener)
+
+      name |> Embassy.Rails.registry_name() |> Process.whereis() |> Process.exit(:kill)
+
+      await_restart(name, Embassy.Rails.RedisListener, listener)
+      assert Embassy.Rails.Config.snapshot(name).name == name
+    end
+
+    test "a crash-looping broadcast listener leaves connections and presence running" do
+      name = Embassy.RailsTest.ListenerLoop
+      sup = start_supervised!({Embassy.Rails, redis_opts(name)})
+      connections = Process.whereis(Embassy.Rails.connections_name(name))
+      tracker = find_child(name, Embassy.Rails.PresenceTracker)
+
+      Enum.reduce(1..6, find_child(name, Embassy.Rails.RedisListener), fn _, listener ->
+        Process.exit(listener, :kill)
+        await_restart(name, Embassy.Rails.RedisListener, listener)
+      end)
+
+      assert Process.alive?(sup)
+      assert Process.whereis(Embassy.Rails.connections_name(name)) == connections
+      assert find_child(name, Embassy.Rails.PresenceTracker) == tracker
+    end
+
+    test "a restarted task supervisor does not restart presence" do
+      name = Embassy.RailsTest.TasksCrash
+      start_supervised!({Embassy.Rails, valid_opts(name)})
+      tracker = find_child(name, Embassy.Rails.PresenceTracker)
+
+      tasks = Process.whereis(Embassy.Rails.tasks_name(name))
+      Process.exit(tasks, :kill)
+
+      assert Enum.find_value(1..100, fn _ ->
+               new = Process.whereis(Embassy.Rails.tasks_name(name))
+               (is_pid(new) and new != tasks) || (Process.sleep(10) && false)
              end)
+
+      assert find_child(name, Embassy.Rails.PresenceTracker) == tracker
     end
   end
 

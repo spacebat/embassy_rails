@@ -14,6 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `Embassy.Rails.RPC.disconnect/2` runs under a `Task.Supervisor` in the
   instance's tree, capped by the new `rpc: [max_disconnects: n]` option
   (default 1000); a disconnect over the cap is dropped with a warning.
+- The instance supervisor is `rest_for_one`: the connections Registry,
+  the config Registry, then two `one_for_one` groups, `<name>.Services`
+  (gRPC channel, task supervisor, presence) and `<name>.BroadcastSource`
+  (the Redis listener). A config Registry restart now restarts the
+  children that depend on it; before, it took the whole instance down. A
+  broadcast listener that keeps crashing now exhausts only its own group's
+  restart intensity, and no longer stops the WebSockets.
 
 ### Added
 

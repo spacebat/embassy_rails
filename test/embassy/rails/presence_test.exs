@@ -186,7 +186,7 @@ defmodule Embassy.Rails.PresenceTest do
   end
 
   test "join and leave do not exit the caller while the server is down", %{instance: instance} do
-    :ok = Supervisor.terminate_child(instance, Presence)
+    :ok = Supervisor.terminate_child(Embassy.Rails.services_name(instance), Presence)
 
     assert {:error, :unavailable} = Presence.join(instance, "room", "sid1", "u1", nil)
     assert :ok = Presence.leave(instance, "room", "sid1")

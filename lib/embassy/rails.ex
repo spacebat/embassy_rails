@@ -136,6 +136,12 @@ defmodule Embassy.Rails do
   @doc false
   def tasks_name(name), do: Module.concat(name, Tasks)
 
+  @doc false
+  def services_name(name), do: Module.concat(name, Services)
+
+  @doc false
+  def broadcast_source_name(name), do: Module.concat(name, BroadcastSource)
+
   @doc "Name of the duplicate-key Registry every live Connection registers in (key `:conn`)."
   @spec connections_name(atom()) :: atom()
   def connections_name(name), do: Module.concat(name, Connections)
@@ -167,21 +173,38 @@ defmodule Embassy.Rails do
       tuning: tuning
     }
 
-    children =
-      [
-        {Registry,
-         keys: :unique, name: registry_name(name), meta: [config: snapshot, tuning: tuning]},
-        {Registry, keys: :duplicate, name: connections_name(name)}
-      ] ++
-        rpc_children(name, rpc) ++
+    services =
+      rpc_children(name, rpc) ++
         [
           {Task.Supervisor,
            name: tasks_name(name), max_children: Keyword.get(rpc, :max_disconnects, 1_000)}
         ] ++
-        presence_children(name, pubsub, snapshot.presence) ++
-        broadcast_children(name, broadcast)
+        presence_children(name, pubsub, snapshot.presence)
 
-    Supervisor.init(children, strategy: :one_for_one)
+    # rest_for_one: every child after the config Registry reads its meta or
+    # registers in it, so a Registry restart restarts them too. The
+    # connections Registry comes first, so live connections stay registered
+    # (and drainable) through that. Services and the broadcast source are
+    # one_for_one groups of their own: a crash in one does not restart its
+    # siblings, and a broadcast listener that keeps crashing exhausts only
+    # its own group's restart intensity.
+    children = [
+      {Registry, keys: :duplicate, name: connections_name(name)},
+      {Registry,
+       keys: :unique, name: registry_name(name), meta: [config: snapshot, tuning: tuning]},
+      group(services_name(name), services),
+      group(broadcast_source_name(name), broadcast_children(name, broadcast))
+    ]
+
+    Supervisor.init(children, strategy: :rest_for_one)
+  end
+
+  defp group(name, children) do
+    %{
+      id: name,
+      type: :supervisor,
+      start: {Supervisor, :start_link, [children, [strategy: :one_for_one, name: name]]}
+    }
   end
 
   defp fetch_required!(opts, key) do
