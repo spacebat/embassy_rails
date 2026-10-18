@@ -51,6 +51,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   call exit the calling WebSocket process, and was never replaced. Calls
   now return an error, and `GrpcChannel` monitors the connection process
   and reconnects when it goes down.
+- `GrpcChannel` leaked its connection when the config Registry restarted:
+  unpublishing the channel raised before it was closed.
 - A connection whose connect RPC completed after draining began was never
   sent the drain message; it now drains itself on registration.
 - A disconnect RPC started while the instance was stopping could crash

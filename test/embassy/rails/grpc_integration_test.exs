@@ -122,6 +122,21 @@ defmodule Embassy.Rails.GrpcIntegrationTest do
   end
 
   @tag :capture_log
+  test "a config Registry restart closes the old connection", %{instance: instance} do
+    {:ok, before} = GrpcChannel.fetch_channel(instance)
+    children_before = DynamicSupervisor.count_children(GRPC.Client.Supervisor).active
+
+    instance |> Embassy.Rails.registry_name() |> Process.whereis() |> Process.exit(:kill)
+
+    assert Helpers.eventually(
+             fn -> match?({:ok, ch} when ch != before, GrpcChannel.fetch_channel(instance)) end,
+             100
+           )
+
+    assert DynamicSupervisor.count_children(GRPC.Client.Supervisor).active == children_before
+  end
+
+  @tag :capture_log
   test "a reconnect closes the previous connection", %{instance: instance} do
     sup = GRPC.Client.Supervisor
     children_before = DynamicSupervisor.count_children(sup).active

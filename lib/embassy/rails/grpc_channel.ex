@@ -141,7 +141,7 @@ if Code.ensure_loaded?(GRPC.Stub) do
 
     defp close(%{channel: channel} = state) do
       if state.monitor, do: Process.demonitor(state.monitor, [:flush])
-      Registry.put_meta(Embassy.Rails.registry_name(state.instance), :grpc_channel, nil)
+      unpublish(state.instance)
 
       try do
         GRPC.Stub.disconnect(channel)
@@ -150,6 +150,14 @@ if Code.ensure_loaded?(GRPC.Stub) do
       end
 
       %{state | channel: nil, monitor: nil}
+    end
+
+    # The config Registry is already gone when it is what restarted, and
+    # the channel must still be closed.
+    defp unpublish(instance) do
+      Registry.put_meta(Embassy.Rails.registry_name(instance), :grpc_channel, nil)
+    rescue
+      ArgumentError -> :ok
     end
 
     defp monitor(%GRPC.Channel{adapter_payload: %{conn_pid: pid}}) when is_pid(pid),
