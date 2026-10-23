@@ -63,6 +63,10 @@ defmodule Embassy.Rails.Connection do
 
         {:stop, :normal, {1011, "unauthorized"}, [disconnect_frame], state}
 
+      {:ok, resp} ->
+        Logger.error("Embassy.Rails.Connection: connect RPC error response=#{inspect(resp)}")
+        {:stop, :normal, {1011, "rpc_error"}, state}
+
       {:error, reason} ->
         Logger.error("Embassy.Rails.Connection: connect RPC failed: #{inspect(reason)}")
         {:stop, :normal, {1011, "rpc_error"}, state}

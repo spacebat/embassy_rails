@@ -147,7 +147,9 @@ if Code.ensure_loaded?(GRPC.Stub) do
         adapter: GRPC.Client.Adapters.Mint,
         adapter_opts: [transport_opts: [timeout: 2_000]],
         connect_timeout: 3_000,
-        headers: [{"authorization", "Bearer " <> state.secret}]
+        # anycable-rpc rejects a client that doesn't declare its protocol
+        # version ("Incompatible AnyCable RPC client"); anycable-go sends v1.
+        headers: [{"authorization", "Bearer " <> state.secret}, {"protov", "v1"}]
       ]
 
       case GRPC.Stub.connect(state.endpoint, opts) do

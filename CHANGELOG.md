@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in this package uses the 0.4 breaking changes (`DualRoute` route and
   `request_path` split, `Target.run/5`), so no code changed.
 
+### Fixed
+
+- The gRPC transport sends `protov: v1` metadata. anycable-rpc answers
+  ERROR ("Incompatible AnyCable RPC client") to a client without it, so
+  every connect failed against a real anycable-rpc.
+- A connect answered with status ERROR closes the socket 1011
+  `rpc_error`; it crashed the connection process.
+
 ## [0.4.0] - 2026-10-18
 
 ### Changed

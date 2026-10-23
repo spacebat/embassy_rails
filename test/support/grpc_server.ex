@@ -11,7 +11,14 @@ defmodule Embassy.Rails.Test.GrpcServer do
 
     @spec connect(Anycable.ConnectionRequest.t(), GRPC.Server.Stream.t()) ::
             Anycable.ConnectionResponse.t()
-    def connect(_request, _stream) do
+    def connect(_request, stream) do
+      # anycable-rpc answers ERROR to a client that doesn't send protov.
+      if GRPC.Stream.get_headers(stream)["protov"] == "v1",
+        do: success_connect(),
+        else: %Anycable.ConnectionResponse{status: :ERROR, error_msg: "incompatible client"}
+    end
+
+    defp success_connect do
       %Anycable.ConnectionResponse{
         status: :SUCCESS,
         identifiers: ~s({"uid":1}),

@@ -76,6 +76,17 @@ defmodule Embassy.Rails.ConnectionTest do
            }
   end
 
+  test "init/1 status 0 (Rails-side error): closes 1011 rpc_error", %{
+    bypass: bypass,
+    state: state
+  } do
+    Bypass.expect_once(bypass, "POST", "/_anycable/connect", fn conn ->
+      Plug.Conn.resp(conn, 200, ~s({"status":0,"error_msg":"boom"}))
+    end)
+
+    assert {:stop, :normal, {1011, "rpc_error"}, ^state} = Connection.init(state)
+  end
+
   test "init/1 RPC error: closes 1011 rpc_error", %{bypass: bypass, state: state} do
     Bypass.down(bypass)
 
