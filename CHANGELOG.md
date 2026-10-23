@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A connect answered with status ERROR closes the socket 1011
   `rpc_error`; it crashed the connection process.
 
+### Security
+
+- Lock `plug_crypto` 2.2.1 (was 2.2.0) for EEF-CVE-2026-105963.
+
 ## [0.4.0] - 2026-10-18
 
 ### Changed
