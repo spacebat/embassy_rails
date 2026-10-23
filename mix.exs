@@ -87,7 +87,7 @@ defmodule EmbassyRails.MixProject do
     if System.get_env("EMBASSY_PATH") do
       {:embassy, path: "../embassy"}
     else
-      {:embassy, "~> 0.3", repo: "spacebat"}
+      {:embassy, "~> 0.4", repo: "spacebat"}
     end
   end
 

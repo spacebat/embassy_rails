@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Requires `embassy ~> 0.4` (was `~> 0.3`); the lock is on 0.4.1. Nothing
+  in this package uses the 0.4 breaking changes (`DualRoute` route and
+  `request_path` split, `Target.run/5`), so no code changed.
+
 ## [0.4.0] - 2026-10-18
 
 ### Changed
