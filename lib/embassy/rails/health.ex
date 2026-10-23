@@ -15,6 +15,10 @@ defmodule Embassy.Rails.Health do
 
   alias Embassy.Rails.{Config, Drain, GrpcChannel}
 
+  # Only called for a gRPC transport, which config validation refuses
+  # without the optional grpc dep (then GrpcChannel is an empty module).
+  @compile {:no_warn_undefined, GrpcChannel}
+
   @probe_timeout 1_000
 
   @spec ready?(atom()) :: boolean()

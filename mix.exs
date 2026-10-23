@@ -47,6 +47,14 @@ defmodule EmbassyRails.MixProject do
         "hex.audit",
         "format --check-formatted",
         "compile --warnings-as-errors --force",
+        # A consumer need not have the optional deps (grpc, protobuf, redix,
+        # igniter, telemetry_metrics); prove the package compiles without
+        # them. Dev env, since test/support needs grpc; an own build root,
+        # so the stub modules never land in _build/dev. Deps compile in a
+        # separate VM: one that compiled protobuf still has it loaded.
+        "cmd env MIX_ENV=dev MIX_BUILD_ROOT=_build/no_optional_deps mix deps.compile",
+        "cmd env MIX_ENV=dev MIX_BUILD_ROOT=_build/no_optional_deps " <>
+          "mix compile --no-optional-deps --warnings-as-errors",
         "credo",
         "sobelow --skip --exit",
         "test --warnings-as-errors"

@@ -24,6 +24,10 @@ defmodule Embassy.Rails.RPC do
   alias Embassy.Rails.Config
   alias Embassy.Rails.RPC.Grpc
 
+  # Only called for a gRPC transport, which config validation refuses
+  # without the optional grpc dep (then Grpc is an empty module).
+  @compile {:no_warn_undefined, Grpc}
+
   require Logger
 
   @timeout 5_000

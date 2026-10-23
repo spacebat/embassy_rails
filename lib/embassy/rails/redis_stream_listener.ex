@@ -95,6 +95,9 @@ defmodule Embassy.Rails.RedisStreamListener do
 
   alias Embassy.Rails.{Broadcast, BroadcastEnvelope, Drain, Health}
 
+  # redix is optional; config validation refuses a Redis source without it.
+  @compile {:no_warn_undefined, Redix}
+
   @default_stream "__anycable__"
   @default_group "bx"
   @default_block_ms 2_000
@@ -285,7 +288,7 @@ defmodule Embassy.Rails.RedisStreamListener do
            "MKSTREAM"
          ]) do
       {:ok, _} -> {:ok, connected(state)}
-      {:error, %Redix.Error{message: "BUSYGROUP" <> _}} -> {:ok, connected(state)}
+      {:error, %{__struct__: Redix.Error, message: "BUSYGROUP" <> _}} -> {:ok, connected(state)}
       {:error, error} -> {:error, error, state}
     end
   end
@@ -402,8 +405,13 @@ defmodule Embassy.Rails.RedisStreamListener do
 
   # The group vanished (XGROUP DESTROY), or the stream key was deleted
   # under a blocked read: recreate the group and poll again at once.
-  defp handle_error(%Redix.Error{message: "NOGROUP" <> _}, state), do: regroup(state)
-  defp handle_error(%Redix.Error{message: "UNBLOCKED" <> _}, state), do: regroup(state)
+  # Redix structs are matched without `%Redix.Error{}` so this module
+  # compiles for a consumer without the optional redix dep.
+  defp handle_error(%{__struct__: Redix.Error, message: "NOGROUP" <> _}, state),
+    do: regroup(state)
+
+  defp handle_error(%{__struct__: Redix.Error, message: "UNBLOCKED" <> _}, state),
+    do: regroup(state)
 
   defp handle_error(error, state) do
     state = disconnected(state, error)
@@ -476,7 +484,7 @@ defmodule Embassy.Rails.RedisStreamListener do
   defp run(_state, fun) do
     fun.()
   catch
-    :exit, reason -> {:error, %Redix.ConnectionError{reason: {:exited, reason}}}
+    :exit, reason -> {:error, struct(Redix.ConnectionError, reason: {:exited, reason})}
   end
 
   defp catch_exit(fun) do

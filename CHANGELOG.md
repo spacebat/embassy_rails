@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- The package compiles for a consumer without the optional `grpc`,
+  `protobuf` and `redix` deps. The generated AnyCable protobuf modules
+  were unguarded and `RedisStreamListener` matched on Redix structs, so
+  0.3.0 through 0.4.1 needed all three to compile. `mix ci` now compiles
+  the package with `--no-optional-deps`.
+
 ## [0.4.1] - 2026-10-23
 
 ### Changed

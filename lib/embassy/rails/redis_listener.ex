@@ -17,6 +17,9 @@ defmodule Embassy.Rails.RedisListener do
 
   alias Embassy.Rails.{Broadcast, BroadcastEnvelope, Health}
 
+  # redix is optional; config validation refuses a Redis source without it.
+  @compile {:no_warn_undefined, Redix.PubSub}
+
   @default_channel "__anycable__"
 
   @doc false
