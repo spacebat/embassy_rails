@@ -12,6 +12,9 @@ defmodule Embassy.Rails.Config do
   `:redis` and optionally `:stream`, `:group`, `:block_ms` and
   `:consumer`.
 
+  The `:connect` key is the local connect function (see `Embassy.Rails`),
+  or `nil` when every connect goes to the RPC.
+
   The `:presence` key is `nil` when presence is disabled
   (`presence: false`), and otherwise
   `%{ttl_ms: pos_integer, api_secret: binary | nil, upstream: binary | nil}`.
@@ -32,6 +35,7 @@ defmodule Embassy.Rails.Config do
               %{ttl_ms: pos_integer(), api_secret: binary() | nil, upstream: binary() | nil}
               | nil,
             headers: [binary()],
+            connect: (map() -> term()) | {module(), atom(), list()} | nil,
             tuning: tuning()
           }
 

@@ -93,6 +93,85 @@ defmodule Embassy.Rails.ConnectionTest do
     assert {:stop, :normal, {1011, "rpc_error"}, ^state} = Connection.init(state)
   end
 
+  describe "connect option" do
+    setup %{bypass: bypass, state: state} do
+      instance = __MODULE__.LocalConnect
+      test_pid = self()
+
+      start_supervised!(
+        {Embassy.Rails,
+         name: instance,
+         embassy: Embassy.Rails.ConnectionTest.Embassy,
+         pubsub: Embassy.Rails.ConnectionTest.PubSub,
+         rpc: [transport: {:http, "http://localhost:#{bypass.port}"}, secret: "shh"],
+         broadcast: [source: :http, key: "bcast"],
+         connect: fn env ->
+           send(test_pid, {:connect_env, env})
+           :persistent_term.get({__MODULE__, :connect_result})
+         end}
+      )
+
+      state = %{state | instance: instance, headers: %{"x-auth-token" => "tok"}}
+      {:ok, state: state}
+    end
+
+    test "an accepted connect skips the RPC and pushes its transmissions", %{state: state} do
+      :persistent_term.put(
+        {__MODULE__, :connect_result},
+        {:ok,
+         %{identifiers: ~s({"connected_user":"u1"}), transmissions: [~s({"type":"welcome"})]}}
+      )
+
+      assert {:push, [{:text, frame}], new_state} = Connection.init(state)
+      assert Jason.decode!(frame) == %{"type" => "welcome"}
+      assert new_state.identifiers == ~s({"connected_user":"u1"})
+
+      assert_received {:connect_env,
+                       %{url: "wss://test/cable", headers: %{"x-auth-token" => "tok"}}}
+
+      assert {self(), nil} in Registry.lookup(
+               Embassy.Rails.connections_name(state.instance),
+               :conn
+             )
+    end
+
+    test "an accepted connect without transmissions still gets a welcome", %{state: state} do
+      :persistent_term.put({__MODULE__, :connect_result}, {:ok, %{identifiers: "ids"}})
+
+      assert {:push, [{:text, frame}], %{identifiers: "ids"}} = Connection.init(state)
+      assert Jason.decode!(frame) == %{"type" => "welcome"}
+    end
+
+    test ":unauthorized closes like a status 2 from Rails, without the RPC", %{state: state} do
+      :persistent_term.put({__MODULE__, :connect_result}, :unauthorized)
+
+      assert {:stop, :normal, {1011, "unauthorized"}, [{:text, frame}], ^state} =
+               Connection.init(state)
+
+      assert Jason.decode!(frame)["reason"] == "unauthorized"
+    end
+
+    test ":rpc falls through to the connect RPC", %{bypass: bypass, state: state} do
+      :persistent_term.put({__MODULE__, :connect_result}, :rpc)
+
+      Bypass.expect_once(bypass, "POST", "/_anycable/connect", fn conn ->
+        Plug.Conn.resp(conn, 200, ~s({"status":1,"identifiers":"from-rails","transmissions":[]}))
+      end)
+
+      assert {:push, _, %{identifiers: "from-rails"}} = Connection.init(state)
+    end
+
+    test "a crashing connect function falls through to the RPC", %{bypass: bypass, state: state} do
+      :persistent_term.put({__MODULE__, :connect_result}, :crash)
+
+      Bypass.expect_once(bypass, "POST", "/_anycable/connect", fn conn ->
+        Plug.Conn.resp(conn, 200, ~s({"status":1,"identifiers":"from-rails","transmissions":[]}))
+      end)
+
+      assert {:push, _, %{identifiers: "from-rails"}} = Connection.init(state)
+    end
+  end
+
   test "handle_info(:ping, state): pushes ping frame and reschedules", %{state: state} do
     assert {:push, {:text, frame}, ^state} = Connection.handle_info(:ping, state)
 

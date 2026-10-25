@@ -54,6 +54,15 @@ defmodule Embassy.Rails do
     * `:headers` — list of extra request header names forwarded to the RPC
       `Env` (case-insensitive), added to the defaults
       `cookie`, `user-agent`, `origin`, `x-forwarded-for`, `x-real-ip`.
+    * `:connect` — a one-arity function or `{module, function, args}`
+      (the env is prepended) that may authenticate a new WebSocket in
+      place of the connect RPC. It gets the connect `Env` (`%{url:, headers:,
+      cstate:, istate:}`) and returns `{:ok, %{identifiers: json,
+      transmissions: [json]}}` to accept (identifiers as Rails would have
+      serialized them, since every later command carries them),
+      `:unauthorized` to close the socket as Rails' rejection would, or
+      `:rpc` to fall through to the connect RPC. A raise falls through too.
+      Default: none, every connect goes to Rails.
     * `:presence` — keyword, or `false` to disable AnyCable presence.
       `:ttl_ms` (default `60_000`) is how long a disconnected client stays
       present; `:api_secret` (default `nil`, no auth) guards
@@ -109,6 +118,7 @@ defmodule Embassy.Rails do
     broadcast = fetch_required!(opts, :broadcast)
     validate_broadcast!(broadcast, Code.ensure_loaded?(Redix.PubSub))
     validate_rpc!(rpc, Code.ensure_loaded?(GRPC.Stub))
+    validate_connect!(Keyword.get(opts, :connect))
     normalize_presence!(Keyword.get(opts, :presence, []))
     normalize_tuning!(opts)
     # Validate the parent Embassy instance is running in the caller's
@@ -176,6 +186,7 @@ defmodule Embassy.Rails do
       broadcast: broadcast,
       presence: normalize_presence!(Keyword.get(opts, :presence, [])),
       headers: forwarded_headers(Keyword.get(opts, :headers, [])),
+      connect: Keyword.get(opts, :connect),
       tuning: tuning
     }
 
@@ -248,6 +259,17 @@ defmodule Embassy.Rails do
       _ ->
         :ok
     end
+  end
+
+  defp validate_connect!(nil), do: :ok
+  defp validate_connect!(fun) when is_function(fun, 1), do: :ok
+
+  defp validate_connect!({m, f, a}) when is_atom(m) and is_atom(f) and is_list(a), do: :ok
+
+  defp validate_connect!(other) do
+    raise ArgumentError,
+          "Embassy.Rails: :connect must be a one-arity function or an {module, function, args} " <>
+            "tuple, got #{inspect(other)}"
   end
 
   defp validate_consume_when!(nil), do: :ok

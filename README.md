@@ -29,6 +29,29 @@ Phoenix-as-front-door deployment for Rails.
   instance plumbing.
 - `:telemetry` for RPC, broadcast, upgrade, and WS lifecycle.
 
+## Connecting without the RPC
+
+By default every new WebSocket is authenticated by Rails through the
+connect RPC. The `:connect` option lets the Phoenix side do it instead,
+for example by decrypting the client's token itself:
+
+```elixir
+{Embassy.Rails,
+   name: MyApp.Embassy.Rails,
+   ...,
+   connect: &MyApp.Cable.connect/1}
+```
+
+The function gets the connect `Env` (`%{url:, headers:, cstate:, istate:}`)
+and returns one of:
+
+- `{:ok, %{identifiers: json, transmissions: [json]}}` to accept. The
+  identifiers must be what Rails would have serialized (anycable-rails
+  uses GlobalID params), since every later command carries them to Rails.
+- `:unauthorized` to close the socket as Rails' rejection would.
+- `:rpc` to fall through to the connect RPC. A raise or an unexpected
+  return falls through too, with an error logged.
+
 ## Not yet shipped
 
 - Generic `Embassy.Upgrade` extraction (this lives in
@@ -200,7 +223,7 @@ the same Rails backend via `Embassy.ReverseProxy` on a different route.
 
 ## Status
 
-v0.4.2, tagged on GitHub and published to the local `spacebat` Hex registry (not public hex.pm).
+v0.5.0, tagged on GitHub and published to the local `spacebat` Hex registry (not public hex.pm).
 See `RELEASING.md` for the publish process.
 
 ## License

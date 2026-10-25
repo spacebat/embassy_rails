@@ -55,6 +55,14 @@ defmodule Embassy.RailsTest do
     end
   end
 
+  test "raises ArgumentError when :connect is not a function or mfa" do
+    opts = valid_opts(Embassy.RailsTest.BadConnect) |> Keyword.put(:connect, :nope)
+
+    assert_raise ArgumentError, ~r/:connect must be/, fn ->
+      Embassy.Rails.start_link(opts)
+    end
+  end
+
   test "raises ArgumentError when :broadcast is missing" do
     opts = valid_opts(Embassy.RailsTest.NoBcast) |> Keyword.delete(:broadcast)
 

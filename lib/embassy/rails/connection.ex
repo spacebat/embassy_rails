@@ -38,30 +38,54 @@ defmodule Embassy.Rails.Connection do
 
   @impl WebSock
   def init(state) do
-    case RPC.connect(state.instance, build_env(state, :connect)) do
+    env = build_env(state, :connect)
+
+    case local_connect(Config.snapshot(state.instance).connect, env) do
+      {:ok, %{identifiers: identifiers} = resp} ->
+        accept(%{state | identifiers: identifiers}, Map.get(resp, :transmissions, []))
+
+      :unauthorized ->
+        reject_unauthorized(state)
+
+      :rpc ->
+        rpc_connect(state, env)
+    end
+  end
+
+  # The instance's :connect option, if any, gets the first say; anything
+  # but a clear accept or reject goes to Rails as before.
+  defp local_connect(nil, _env), do: :rpc
+
+  defp local_connect(connect, env) do
+    result =
+      case connect do
+        fun when is_function(fun, 1) -> fun.(env)
+        {m, f, a} -> apply(m, f, [env | a])
+      end
+
+    case result do
+      {:ok, %{identifiers: identifiers}} when is_binary(identifiers) -> result
+      :unauthorized -> :unauthorized
+      :rpc -> :rpc
+      other -> raise ArgumentError, "connect returned #{inspect(other)}"
+    end
+  rescue
+    e ->
+      Logger.error(
+        "Embassy.Rails.Connection: connect function failed, asking Rails: #{Exception.message(e)}"
+      )
+
+      :rpc
+  end
+
+  defp rpc_connect(state, env) do
+    case RPC.connect(state.instance, env) do
       {:ok, %{"status" => 1} = resp} ->
         state = merge_env(%{state | identifiers: resp["identifiers"]}, resp["env"], nil)
-
-        :telemetry.execute(
-          [:embassy_rails, :ws, :connection, :open],
-          %{monotonic_time: System.monotonic_time()},
-          %{instance: state.instance, channel_identifier: state.identifiers}
-        )
-
-        Registry.register(Embassy.Rails.connections_name(state.instance), :conn, nil)
-
-        # The upgrade checked draining before the connect RPC, which can take
-        # longer than Drain watches for late registrations.
-        if Drain.draining?(state.instance), do: send(self(), :embassy_rails_drain)
-
-        schedule_ping(state)
-        {:push, connect_frames(resp["transmissions"] || []), state}
+        accept(state, resp["transmissions"] || [])
 
       {:ok, %{"status" => 2}} ->
-        disconnect_frame =
-          {:text, Jason.encode!(%{type: "disconnect", reason: "unauthorized", reconnect: false})}
-
-        {:stop, :normal, {1011, "unauthorized"}, [disconnect_frame], state}
+        reject_unauthorized(state)
 
       {:ok, resp} ->
         Logger.error("Embassy.Rails.Connection: connect RPC error response=#{inspect(resp)}")
@@ -71,6 +95,30 @@ defmodule Embassy.Rails.Connection do
         Logger.error("Embassy.Rails.Connection: connect RPC failed: #{inspect(reason)}")
         {:stop, :normal, {1011, "rpc_error"}, state}
     end
+  end
+
+  defp accept(state, transmissions) do
+    :telemetry.execute(
+      [:embassy_rails, :ws, :connection, :open],
+      %{monotonic_time: System.monotonic_time()},
+      %{instance: state.instance, channel_identifier: state.identifiers}
+    )
+
+    Registry.register(Embassy.Rails.connections_name(state.instance), :conn, nil)
+
+    # The upgrade checked draining before the connect, which can take
+    # longer than Drain watches for late registrations.
+    if Drain.draining?(state.instance), do: send(self(), :embassy_rails_drain)
+
+    schedule_ping(state)
+    {:push, connect_frames(transmissions), state}
+  end
+
+  defp reject_unauthorized(state) do
+    disconnect_frame =
+      {:text, Jason.encode!(%{type: "disconnect", reason: "unauthorized", reconnect: false})}
+
+    {:stop, :normal, {1011, "unauthorized"}, [disconnect_frame], state}
   end
 
   @impl WebSock
